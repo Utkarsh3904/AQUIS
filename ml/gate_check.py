@@ -48,6 +48,39 @@ def main() -> None:
     check("lag1 ACF = 0.858", round(acf["pooled_acf"]["lag1"], 3) == 0.858,
           f"got {acf['pooled_acf']['lag1']:.4f}")
 
+    bt = Path(OUT / "backtest_6h_summary.json")
+    if bt.exists():
+        s = json.loads(bt.read_text())
+        check("recursive verified + recorded",
+              s.get("no_overlap_windows") and s.get("no_future_observed_values")
+              and "success_vs_direct" in s,
+              f"rec 30d {s.get('best_30d_rmse_rec')} vs direct "
+              f"{s.get('best_30d_rmse_direct_baseline')}")
+        check("direct-30d stays production",
+              s.get("best_30d_rmse_direct_baseline") is not None
+              and s.get("best_30d_rmse_direct_baseline")
+              < s.get("best_30d_rmse_rec"),
+              "recursion did not beat direct at 30d")
+
+    tj = Path(OUT / "traj_backtest_summary.json")
+    if tj.exists():
+        s = json.loads(tj.read_text())
+        rt = s.get("30d_rmse_traj")
+        check("trajectory promoted (honest, above baselines)",
+              bool(s.get("promote_trajectory"))
+              and rt is not None and rt
+              < s.get("30d_rmse_persistence", float("inf"))
+              and rt < s.get("30d_rmse_direct30_production", float("inf")),
+              f"traj 30d {rt} vs persist {s.get('30d_rmse_persistence')} "
+              f"vs direct {s.get('30d_rmse_direct30_production')}")
+        tcal = Path(MODELS / "traj_calibration.json")
+        if tcal.exists():
+            c = json.loads(tcal.read_text())
+            cov30 = c["coverage_calibrated"][-1] if c.get("coverage_calibrated") else None
+            check("trajectory +30d calibrated coverage = 0.90",
+                  cov30 is not None and round(float(cov30), 3) == 0.90,
+                  f"got {cov30}")
+
     ok = all(o for _, o, _ in CHECKS)
     print(f"\nGATE {'PASS' if ok else 'FAIL'} — {sum(o for _, o, _ in CHECKS)}/{len(CHECKS)} checks")
     sys.exit(0 if ok else 1)

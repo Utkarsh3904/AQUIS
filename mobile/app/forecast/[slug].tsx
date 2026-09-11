@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
@@ -21,8 +21,8 @@ const CONFIDENCE_COLORS: Record<string, string> = {
 };
 
 const DIRECTION_COLORS: Record<string, string> = {
-  rising: colors.positive,
-  declining: colors.negative,
+  "expected rise": colors.positive,
+  "expected decline": colors.negative,
   stable: colors.textSecondary,
 };
 
@@ -30,6 +30,7 @@ export default function ForecastScreen() {
   const { slug } = useLocalSearchParams<{ slug: string }>();
   const router = useRouter();
   const { data: forecast, loading, error } = useForecast(slug ?? null);
+  const [selectedPoint, setSelectedPoint] = useState<number | null>(null);
 
   if (loading) {
     return (
@@ -126,6 +127,15 @@ export default function ForecastScreen() {
         {/* ── Chart: trajectory line + q05/q95 band ── */}
         <View style={styles.chartCard}>
           <Text style={styles.chartTitle}>30-Day Trajectory</Text>
+          {/* Confidence legend */}
+          <View style={styles.legendRow}>
+            {(["HIGH", "DIRECTIONAL", "LOW"] as const).map((level) => (
+              <View key={level} style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: CONFIDENCE_COLORS[level] }]} />
+                <Text style={styles.legendText}>{level}</Text>
+              </View>
+            ))}
+          </View>
           <View style={styles.chartArea}>
             {/* q05–q95 band */}
             <View style={styles.chartBars}>
@@ -134,7 +144,12 @@ export default function ForecastScreen() {
                 const yHigh = ((p.q95 - minVal) / range) * 100;
                 const bandHeight = yHigh - yLow;
                 return (
-                  <View key={i} style={styles.chartColumn}>
+                  <TouchableOpacity
+                    key={i}
+                    style={styles.chartColumn}
+                    onPress={() => setSelectedPoint(selectedPoint === i ? null : i)}
+                    activeOpacity={0.6}
+                  >
                     <View
                       style={[
                         styles.chartBand,
@@ -144,22 +159,35 @@ export default function ForecastScreen() {
                         },
                       ]}
                     />
-                  </View>
+                  </TouchableOpacity>
                 );
               })}
             </View>
-            {/* q50 dots */}
+            {/* q50 dots — colored by confidence_level */}
             <View style={styles.chartDots}>
               {chartPoints.map((p, i) => {
                 const y = ((p.q50 - minVal) / range) * 100;
+                const dotColor = CONFIDENCE_COLORS[p.confidence_level] ?? colors.textMuted;
                 return (
-                  <View
+                  <TouchableOpacity
                     key={i}
-                    style={[
-                      styles.chartDot,
-                      { bottom: `${y}%` },
-                    ]}
-                  />
+                    style={[styles.chartDotTouch, { bottom: `${y}%` }]}
+                    onPress={() => setSelectedPoint(selectedPoint === i ? null : i)}
+                    activeOpacity={0.6}
+                  >
+                    <View
+                      style={[
+                        styles.chartDot,
+                        {
+                          backgroundColor: dotColor,
+                          width: selectedPoint === i ? 9 : 5,
+                          height: selectedPoint === i ? 9 : 5,
+                          marginLeft: selectedPoint === i ? -4.5 : -2.5,
+                          borderRadius: selectedPoint === i ? 4.5 : 2.5,
+                        },
+                      ]}
+                    />
+                  </TouchableOpacity>
                 );
               })}
             </View>
@@ -183,6 +211,50 @@ export default function ForecastScreen() {
               {formatIstShort(chartPoints[chartPoints.length - 1].time)}
             </Text>
           </View>
+
+          {/* Selected point info panel */}
+          {selectedPoint !== null && chartPoints[selectedPoint] && (
+            <View style={styles.pointInfoPanel}>
+              <View style={styles.pointInfoHeader}>
+                <Text style={styles.pointInfoTime}>
+                  {formatIstDateTime(chartPoints[selectedPoint].time)}
+                </Text>
+                <TouchableOpacity onPress={() => setSelectedPoint(null)}>
+                  <Text style={styles.pointInfoClose}>×</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.pointInfoRow}>
+                <Text style={styles.pointInfoLabel}>Level (q50)</Text>
+                <Text style={styles.pointInfoValue}>{chartPoints[selectedPoint].q50.toFixed(3)} m</Text>
+              </View>
+              <View style={styles.pointInfoRow}>
+                <Text style={styles.pointInfoLabel}>90% Band</Text>
+                <Text style={styles.pointInfoValue}>
+                  {chartPoints[selectedPoint].q05.toFixed(3)} to {chartPoints[selectedPoint].q95.toFixed(3)}
+                </Text>
+              </View>
+              <View style={styles.pointInfoRow}>
+                <Text style={styles.pointInfoLabel}>Confidence</Text>
+                <View style={[styles.pointConfBadge, { backgroundColor: CONFIDENCE_COLORS[chartPoints[selectedPoint].confidence_level] + "18" }]}>
+                  <Text style={[styles.pointConfText, { color: CONFIDENCE_COLORS[chartPoints[selectedPoint].confidence_level] }]}>
+                    {chartPoints[selectedPoint].confidence_level}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.pointInfoRow}>
+                <Text style={styles.pointInfoLabel}>Driver source</Text>
+                <Text style={styles.pointInfoValue} numberOfLines={2}>
+                  {chartPoints[selectedPoint].driver_source}
+                </Text>
+              </View>
+              <View style={[styles.pointInfoRow, styles.pointInfoRowLast]}>
+                <Text style={styles.pointInfoLabel}>Why this rating</Text>
+                <Text style={styles.pointInfoValue} numberOfLines={3}>
+                  {chartPoints[selectedPoint].reliability_reason}
+                </Text>
+              </View>
+            </View>
+          )}
         </View>
 
         {/* ── 30-Day Summary ── */}
@@ -203,9 +275,9 @@ export default function ForecastScreen() {
                   styles.summaryStatValue,
                   {
                     color:
-                      forecast.direction.label === "rising"
+                      forecast.direction.label === "expected rise"
                         ? colors.positive
-                        : forecast.direction.label === "declining"
+                        : forecast.direction.label === "expected decline"
                         ? colors.negative
                         : colors.textPrimary,
                   },
@@ -416,7 +488,29 @@ const styles = StyleSheet.create({
   chartTitle: {
     ...typography.subheading,
     color: colors.textPrimary,
+    marginBottom: spacing.sm,
+  },
+  legendRow: {
+    flexDirection: "row",
+    gap: spacing.md,
     marginBottom: spacing.md,
+  },
+  legendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  legendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  legendText: {
+    ...typography.caption,
+    color: colors.textMuted,
+    fontSize: 10,
+    textTransform: "uppercase",
+    fontWeight: "600",
   },
   chartArea: {
     height: 200,
@@ -450,11 +544,14 @@ const styles = StyleSheet.create({
   chartDot: {
     position: "absolute",
     left: "50%",
-    marginLeft: -2.5,
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
     backgroundColor: colors.primary,
+  },
+  chartDotTouch: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    height: 20,
+    justifyContent: "center",
   },
   anchorLine: {
     position: "absolute",
@@ -482,6 +579,62 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.textMuted,
     fontSize: 10,
+  },
+  // ── Point info panel ──
+  pointInfoPanel: {
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
+    gap: spacing.sm,
+  },
+  pointInfoHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  pointInfoTime: {
+    ...typography.subheading,
+    color: colors.textPrimary,
+    fontSize: 13,
+  },
+  pointInfoClose: {
+    fontSize: 20,
+    color: colors.textMuted,
+    paddingHorizontal: spacing.sm,
+  },
+  pointInfoRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: spacing.md,
+  },
+  pointInfoRowLast: {
+    alignItems: "flex-start",
+  },
+  pointInfoLabel: {
+    ...typography.caption,
+    color: colors.textMuted,
+    fontSize: 11,
+    flexShrink: 0,
+  },
+  pointInfoValue: {
+    ...typography.caption,
+    color: colors.textPrimary,
+    fontSize: 11,
+    textAlign: "right",
+    flex: 1,
+  },
+  pointConfBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: radii.full,
+  },
+  pointConfText: {
+    ...typography.caption,
+    fontSize: 10,
+    fontWeight: "700",
+    textTransform: "uppercase",
   },
   // ── 30-Day Summary ──
   summaryCard: {

@@ -12,6 +12,7 @@ import { useRouter } from "expo-router";
 import { colors, typography } from "../../theme/colors";
 import { spacing, radii } from "../../theme/spacing";
 import { useStations } from "../../lib/hooks";
+import { USE_MOCKS } from "../../lib/env";
 import { formatIstFullDate } from "../../lib/timezone";
 import type { StationListItem } from "../../types/station";
 
@@ -90,7 +91,10 @@ export default function WatchlistScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
         renderItem={({ item }) => (
-          <StationRow station={item} onPress={() => router.push(`/station/${item.id}`)} />
+          <StationRow station={item} onPress={() => {
+            const param = USE_MOCKS ? String(item.id) : (item.slug ?? String(item.id));
+            router.push(`/station/${param}`);
+          }} />
         )}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
       />

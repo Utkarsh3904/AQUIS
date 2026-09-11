@@ -14,6 +14,19 @@ export interface PaginatedResponse<T> {
   data: T[];
 }
 
+// Real ML service response: GET /stations
+export interface MlStationListItem {
+  district: string;
+  last_ts: string; // "2026-09-09 18:00:00" (space-separated)
+  slug: string;
+  station: string;
+}
+
+export interface MlStationListResponse {
+  count: number;
+  stations: MlStationListItem[];
+}
+
 // backend telemetry response: GET /telemetry/:stationId
 export interface TelemetryObservation {
   id: number;

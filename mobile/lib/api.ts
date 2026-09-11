@@ -6,7 +6,7 @@ import { getMockAssistantResponse } from "./mocks/assistant";
 import type { StationRow, StationListItem, StationFacts } from "../types/station";
 import type { ForecastResponse } from "../types/forecast";
 import type { AssistantRequest, AssistantResponse } from "../types/assistant";
-import type { PaginatedResponse, TrendResponse } from "../types/api";
+import type { PaginatedResponse, MlStationListResponse, TrendResponse } from "../types/api";
 
 const FETCH_TIMEOUT_MS = 30_000;
 
@@ -50,48 +50,59 @@ export function mapStationRow(row: StationRow): StationListItem {
     slug: null, // never on GET /stations — that endpoint doesn't touch Flask
     lat: row.latitude,
     lon: row.longitude,
-    last_ts: row.last_observed_at,
+    last_ts: row.last_observed_at?.replace(" ", "T"), // real API returns space-separated, normalize to ISO-8601
     external_station_id: row.external_station_id,
   };
 }
 
 // ─── Station list ───────────────────────────────────────────────────────
-// GET /stations — raw DB rows, normalized via mapStationRow
+// GET /stations — real ML service returns {count, stations: [{district, last_ts, slug, station}]}
+// Mock path returns raw DB rows normalized via mapStationRow
 export async function fetchStationList(): Promise<StationListItem[]> {
   if (USE_MOCKS) return mockStationRows.map(mapStationRow);
-  const res = await apiFetch<PaginatedResponse<StationRow>>("/stations");
-  return res.data.map(mapStationRow);
+  const res = await apiFetch<MlStationListResponse>("/stations");
+  return res.stations.map((s) => ({
+    id: 0, // ML service doesn't provide numeric IDs — slug is the identifier
+    station: s.station,
+    district: s.district,
+    slug: s.slug,
+    lat: 0, // ML service doesn't provide coordinates
+    lon: 0,
+    last_ts: s.last_ts?.replace(" ", "T"),
+    external_station_id: s.slug,
+  }));
 }
 
 // ─── Station facts (detail KPIs) ───────────────────────────────────────
-// GET /stations/:id — raw DB row for one station + our mock facts
-export async function fetchStationFacts(id: number): Promise<StationFacts> {
+// Mock: GET /stations/:id (numeric PK)
+// Live: GET /stations/<slug> (ML service slug-based endpoint)
+export async function fetchStationFacts(idOrSlug: number | string): Promise<StationFacts> {
   if (USE_MOCKS) {
-    return getMockStationFacts(id);
+    return getMockStationFacts(Number(idOrSlug));
   }
-  return apiFetch<StationFacts>(`/stations/${id}`);
+  return apiFetch<StationFacts>(`/stations/${idOrSlug}`);
 }
 
 // ─── Forecast ───────────────────────────────────────────────────────────
-// GET /ml/live/forecast/:slug?days=30 — slug from Flask service, nullable
+// GET /forecast/:slug — slug from ML service, nullable
 // Coverage: ~600 stations have models, ~545 scored per cycle.
 // No pre-filter flag — must attempt call and handle error gracefully.
 export async function fetchForecast(slug: string): Promise<ForecastResponse> {
   if (USE_MOCKS) {
     return getMockForecast(slug);
   }
-  return apiFetch<ForecastResponse>(`/ml/live/forecast/${slug}?days=30`);
+  return apiFetch<ForecastResponse>(`/forecast/${slug}`);
 }
 
 // ─── Assistant ──────────────────────────────────────────────────────────
-// POST /ml/assistant/chat
+// POST /assistant/chat
 export async function postAssistantChat(
   req: AssistantRequest
 ): Promise<AssistantResponse> {
   if (USE_MOCKS) {
     return getMockAssistantResponse(req.question, req.station);
   }
-  return apiFetch<AssistantResponse>("/ml/assistant/chat", {
+  return apiFetch<AssistantResponse>("/assistant/chat", {
     method: "POST",
     body: JSON.stringify(req),
   });

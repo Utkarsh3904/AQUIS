@@ -3,7 +3,6 @@ import {
   View,
   Text,
   ScrollView,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   StatusBar,
@@ -11,18 +10,17 @@ import {
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { colors, typography } from "../../theme/colors";
 import { spacing, radii } from "../../theme/spacing";
-import { useStationFacts, useStations } from "../../lib/hooks";
+import { useStationFactsBySlug, useStations } from "../../lib/hooks";
 import { EmptyState } from "../../components/EmptyState";
 
 export default function StationDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { slug } = useLocalSearchParams<{ slug: string }>();
   const router = useRouter();
-  const stationId = Number(id);
 
   const { data: station, loading: stationLoading, error: stationError } = useStations();
-  const { data: facts, loading: factsLoading, error: factsError } = useStationFacts(stationId || null);
+  const { data: facts, loading: factsLoading, error: factsError } = useStationFactsBySlug(slug ?? null);
 
-  const currentStation = station?.find((s) => s.id === stationId) ?? null;
+  const currentStation = station?.find((s) => s.slug === slug) ?? null;
   const loading = stationLoading || factsLoading;
   const error = stationError ?? factsError;
   const [viewMode, setViewMode] = useState<"live" | "historical">("live");
@@ -68,14 +66,11 @@ export default function StationDetailScreen() {
   }
 
   const directionColor =
-    facts?.forecast.direction === "expected rise"
+    facts?.forecast?.direction === "expected rise"
       ? colors.positive
-      : facts?.forecast.direction === "expected decline"
+      : facts?.forecast?.direction === "expected decline"
       ? colors.negative
       : colors.textSecondary;
-
-  const changeVal = facts ? facts.change_30d : 0;
-  const changeSign = changeVal > 0 ? "+" : "";
 
   return (
     <View style={styles.screen}>
@@ -100,11 +95,13 @@ export default function StationDetailScreen() {
             <Text style={styles.levelValue}>{facts.last}</Text>
             <Text style={styles.levelUnit}>m</Text>
             <Text style={styles.levelDate}>as of {facts.last_date}</Text>
-            <View style={[styles.directionBadge, { backgroundColor: directionColor + "18" }]}>
-              <Text style={[styles.directionText, { color: directionColor }]}>
-                {facts.forecast.direction}
-              </Text>
-            </View>
+            {facts.forecast && (
+              <View style={[styles.directionBadge, { backgroundColor: directionColor + "18" }]}>
+                <Text style={[styles.directionText, { color: directionColor }]}>
+                  {facts.forecast.direction}
+                </Text>
+              </View>
+            )}
           </View>
         )}
 
@@ -161,28 +158,61 @@ export default function StationDetailScreen() {
           </View>
         </View>
 
-        {/* Quick stats */}
+        {/* Quick stats — from facts or fallback to station list data */}
         {facts && (
-          <View style={styles.statsGrid}>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>
-                {changeSign}{facts.change_7d} m
-              </Text>
-              <Text style={styles.statLabel}>7d change</Text>
+          <View style={styles.statsSection}>
+            <Text style={styles.statsSectionTitle}>Key Statistics</Text>
+            <View style={styles.statsGrid}>
+              {[
+                { value: `${facts.change_7d > 0 ? "+" : ""}${facts.change_7d}`, label: "7d change", unit: "m", color: facts.change_7d > 0 ? colors.positive : facts.change_7d < 0 ? colors.negative : colors.textPrimary },
+                { value: `${facts.change_30d > 0 ? "+" : ""}${facts.change_30d}`, label: "30d change", unit: "m", color: facts.change_30d > 0 ? colors.positive : facts.change_30d < 0 ? colors.negative : colors.textPrimary },
+                { value: `${facts.change_60d > 0 ? "+" : ""}${facts.change_60d}`, label: "60d change", unit: "m", color: facts.change_60d > 0 ? colors.positive : facts.change_60d < 0 ? colors.negative : colors.textPrimary },
+                { value: `${facts.change_180d > 0 ? "+" : ""}${facts.change_180d}`, label: "180d change", unit: "m", color: facts.change_180d > 0 ? colors.positive : facts.change_180d < 0 ? colors.negative : colors.textPrimary },
+                { value: facts.min.toFixed(2), label: "All-time low", unit: "m", color: colors.textPrimary },
+                { value: facts.max.toFixed(2), label: "All-time high", unit: "m", color: colors.textPrimary },
+                { value: `${facts.span?.toFixed(2) ?? "—"}`, label: "Range", unit: "m", color: colors.textPrimary },
+                { value: (facts.n_obs ?? 0).toLocaleString(), label: "Observations", unit: "", color: colors.textPrimary },
+                { value: String(facts.outliers ?? 0), label: "Outliers excluded", unit: "", color: (facts.outliers ?? 0) > 10 ? colors.warning : colors.textPrimary },
+              ].map((item, i) => (
+                <View key={i} style={styles.statItem}>
+                  <Text style={[styles.statValue, { color: item.color }]}>
+                    {item.value}{item.unit ? ` ${item.unit}` : ""}
+                  </Text>
+                  <Text style={styles.statLabel}>{item.label}</Text>
+                </View>
+              ))}
             </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>
-                {changeSign}{facts.change_30d} m
-              </Text>
-              <Text style={styles.statLabel}>30d change</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{facts.span} m</Text>
-              <Text style={styles.statLabel}>Range</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{facts.n_obs.toLocaleString()}</Text>
-              <Text style={styles.statLabel}>Observations</Text>
+          </View>
+        )}
+
+        {/* District context — only if facts have it */}
+        {facts?.district_context && (
+          <View style={styles.statsSection}>
+            <Text style={styles.statsSectionTitle}>District Context</Text>
+            <View style={styles.infoCard}>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>District</Text>
+                <Text style={styles.infoValue}>{facts.district}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>District median</Text>
+                <Text style={styles.infoValue}>{facts.district_context.median} m</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Stations analysed</Text>
+                <Text style={styles.infoValue}>{facts.district_context.n_stations}</Text>
+              </View>
+              {facts.last != null && (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>vs. district</Text>
+                  <Text style={[styles.infoValue, {
+                    color: facts.last > facts.district_context.median ? colors.positive : colors.negative,
+                  }]}>
+                    {facts.last > facts.district_context.median ? "above" : "below"} median
+                    ({Math.abs(facts.last - facts.district_context.median).toFixed(2)} m)
+                  </Text>
+                </View>
+              )}
             </View>
           </View>
         )}
@@ -195,13 +225,9 @@ export default function StationDetailScreen() {
             <Text style={styles.infoValue}>{currentStation.district}</Text>
           </View>
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Agency</Text>
-            <Text style={styles.infoValue}>UPGW</Text>
-          </View>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>External ID</Text>
+            <Text style={styles.infoLabel}>Slug</Text>
             <Text style={styles.infoValue} numberOfLines={1}>
-              {currentStation.external_station_id}
+              {currentStation.slug}
             </Text>
           </View>
         </View>
@@ -362,6 +388,13 @@ const styles = StyleSheet.create({
   chartLabel: {
     ...typography.caption,
     color: colors.textMuted,
+  },
+  statsSection: {
+    gap: spacing.sm,
+  },
+  statsSectionTitle: {
+    ...typography.subheading,
+    color: colors.textPrimary,
   },
   statsGrid: {
     flexDirection: "row",

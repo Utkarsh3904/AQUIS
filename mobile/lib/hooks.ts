@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { fetchStationList, fetchStationFacts, fetchForecast } from "../lib/api";
+import { fetchStationList, fetchStationFacts, fetchForecast, fetchTrend, ApiRequestError } from "../lib/api";
 import type { StationListItem, StationFacts } from "../types/station";
 import type { ForecastResponse } from "../types/forecast";
-import type { ApiRequestError } from "../lib/api";
+import type { TrendResponse } from "../types/api";
 import type { ApiError } from "../types/assistant";
 
 export interface HookError {
@@ -50,6 +50,27 @@ export function useStationFacts(id: number | null) {
   return { data, loading, error };
 }
 
+export function useStationFactsBySlug(slug: string | null) {
+  const [data, setData] = useState<StationFacts | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<HookError | null>(null);
+
+  useEffect(() => {
+    if (!slug) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    fetchStationFacts(slug)
+      .then(setData)
+      .catch((e: ApiRequestError) => setError(toHookError(e)))
+      .finally(() => setLoading(false));
+  }, [slug]);
+
+  return { data, loading, error };
+}
+
 export function useForecast(slug: string | null) {
   const [data, setData] = useState<ForecastResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -67,6 +88,27 @@ export function useForecast(slug: string | null) {
       .catch((e: ApiRequestError) => setError(toHookError(e)))
       .finally(() => setLoading(false));
   }, [slug]);
+
+  return { data, loading, error };
+}
+
+export function useTrend(stationId: number | null) {
+  const [data, setData] = useState<TrendResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<HookError | null>(null);
+
+  useEffect(() => {
+    if (!stationId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    fetchTrend(stationId)
+      .then(setData)
+      .catch((e: ApiRequestError) => setError(toHookError(e)))
+      .finally(() => setLoading(false));
+  }, [stationId]);
 
   return { data, loading, error };
 }

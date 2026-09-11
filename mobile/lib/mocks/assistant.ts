@@ -21,7 +21,6 @@ export const mockAssistantRising: AssistantResponse = {
     district_n_stations: 18,
     forecast: {
       anchor: -2.841,
-      pred_xgb: 0.121,
       day30_pred: -2.72,
       change_30d_pred: 0.121,
       direction: "expected rise",
@@ -58,7 +57,6 @@ export const mockAssistantHighUncertainty: AssistantResponse = {
     district_n_stations: 18,
     forecast: {
       anchor: -17.171,
-      pred_xgb: 0.29,
       day30_pred: -16.881,
       change_30d_pred: 0.29,
       direction: "expected rise",

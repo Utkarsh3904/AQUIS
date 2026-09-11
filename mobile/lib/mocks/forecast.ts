@@ -7,8 +7,8 @@ import { ApiRequestError } from "../api";
 // Coverage mock: ~600 stations have models, ~545 scored per cycle.
 // No pre-filter flag exists — must attempt forecast and handle error gracefully.
 const FORECASTABLE_SLUGS = new Set([
-  "Ramchhitoni%20Sahawar_UPGW_a1b2c3d4",
-  "ASHADHA%20PRATHMIK%20VIDYALAYA_UPGW_5f5b3671",
+  "ramchhitoni-sahawar-up-011",
+  "primary-school-ashadh",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -123,7 +123,7 @@ export const mockForecastRamchhitoni: ForecastResponse = {
     band_half: RAMCHHITONI_BAND_HALF,
   },
   direction: {
-    label: "rising",
+    label: "expected rise",
     change_q50_30d: parseFloat(
       (ramchhitoniEndpoint.q50 - RAMCHHITONI_ANCHOR).toFixed(3)
     ),
@@ -189,7 +189,7 @@ export const mockForecastAshadha: ForecastResponse = {
     band_half: ASHADHA_BAND_HALF,
   },
   direction: {
-    label: "declining",
+    label: "expected decline",
     change_q50_30d: parseFloat(
       (ashadhaEndpoint.q50 - ASHADHA_ANCHOR).toFixed(3)
     ),
@@ -223,9 +223,9 @@ export const mockForecastAshadha: ForecastResponse = {
 // "no valid features" (502). No pre-filter flag exists.
 // ---------------------------------------------------------------------------
 export function getMockForecast(slug: string): ForecastResponse {
-  if (slug === "Ramchhitoni%20Sahawar_UPGW_a1b2c3d4")
+  if (slug === "ramchhitoni-sahawar-up-011")
     return mockForecastRamchhitoni;
-  if (slug === "ASHADHA%20PRATHMIK%20VIDYALAYA_UPGW_5f5b3671")
+  if (slug === "primary-school-ashadh")
     return mockForecastAshadha;
 
   // Simulate ML service down — covers 502 ML service error

@@ -174,33 +174,120 @@ export default function AssistantScreen() {
               {/* Facts panel */}
               {item.facts && typeof item.facts === "object" && "last" in item.facts && (
                 <View style={styles.factsPanel}>
-                  <View style={styles.factsRow}>
-                    <Text style={styles.factsLabel}>Last level</Text>
-                    <Text style={styles.factsValue}>{item.facts.last} m</Text>
+                  {/* ── Current level ── */}
+                  <View style={styles.factsSection}>
+                    <Text style={styles.factsSectionTitle}>Observed Level</Text>
+                    <View style={styles.factsRow}>
+                      <Text style={styles.factsLabel}>Current</Text>
+                      <Text style={styles.factsValue}>{item.facts.last} m</Text>
+                    </View>
+                    <View style={styles.factsRow}>
+                      <Text style={styles.factsLabel}>Date</Text>
+                      <Text style={styles.factsValue}>{item.facts.last_date}</Text>
+                    </View>
+                    <View style={styles.factsRow}>
+                      <Text style={styles.factsLabel}>Range</Text>
+                      <Text style={styles.factsValue}>{item.facts.min} to {item.facts.max} m</Text>
+                    </View>
                   </View>
-                  <View style={styles.factsRow}>
-                    <Text style={styles.factsLabel}>30d change</Text>
-                    <Text style={styles.factsValue}>
-                      {item.facts.change_30d > 0 ? "+" : ""}
-                      {item.facts.change_30d} m
-                    </Text>
+
+                  {/* ── Change stats ── */}
+                  <View style={styles.factsSection}>
+                    <Text style={styles.factsSectionTitle}>Level Changes</Text>
+                    {[
+                      { label: "7d", val: item.facts.change_7d },
+                      { label: "30d", val: item.facts.change_30d },
+                      { label: "60d", val: item.facts.change_60d },
+                      { label: "180d", val: item.facts.change_180d },
+                    ].map((c) => (
+                      <View key={c.label} style={styles.factsRow}>
+                        <Text style={styles.factsLabel}>{c.label} change</Text>
+                        <Text style={[styles.factsValue, { color: c.val > 0 ? colors.positive : c.val < 0 ? colors.negative : colors.textPrimary }]}>
+                          {c.val > 0 ? "+" : ""}{c.val} m
+                        </Text>
+                      </View>
+                    ))}
                   </View>
-                  <View style={styles.factsRow}>
-                    <Text style={styles.factsLabel}>Forecast</Text>
-                    <Text
-                      style={[
-                        styles.factsValue,
-                        {
-                          color:
-                            item.facts.forecast?.direction === "expected rise"
-                              ? colors.positive
-                              : colors.negative,
-                        },
-                      ]}
-                    >
-                      {item.facts.forecast?.direction ?? "—"}
-                    </Text>
+
+                  {/* ── District context ── */}
+                  <View style={styles.factsSection}>
+                    <Text style={styles.factsSectionTitle}>District Context</Text>
+                    {item.facts.district_median != null && (
+                      <View style={styles.factsRow}>
+                        <Text style={styles.factsLabel}>District median</Text>
+                        <Text style={styles.factsValue}>{item.facts.district_median} m</Text>
+                      </View>
+                    )}
+                    {item.facts.district_n_stations != null && (
+                      <View style={styles.factsRow}>
+                        <Text style={styles.factsLabel}>Active stations</Text>
+                        <Text style={styles.factsValue}>{item.facts.district_n_stations}</Text>
+                      </View>
+                    )}
+                    {item.facts.last != null && item.facts.district_median != null && (
+                      <View style={styles.factsRow}>
+                        <Text style={styles.factsLabel}>vs. district</Text>
+                        <Text style={[styles.factsValue, {
+                          color: item.facts.last > item.facts.district_median ? colors.positive : colors.negative,
+                        }]}>
+                          {item.facts.last > item.facts.district_median ? "above" : "below"} median
+                          ({Math.abs(item.facts.last - item.facts.district_median).toFixed(2)} m)
+                        </Text>
+                      </View>
+                    )}
                   </View>
+
+                  {/* ── Forecast outlook ── */}
+                  {item.facts.forecast && (
+                    <View style={styles.factsSection}>
+                      <Text style={styles.factsSectionTitle}>30-Day Forecast</Text>
+                      <View style={styles.factsRow}>
+                        <Text style={styles.factsLabel}>Direction</Text>
+                        <Text style={[styles.factsValue, {
+                          color: item.facts.forecast.direction === "expected rise"
+                            ? colors.positive
+                            : item.facts.forecast.direction === "expected decline"
+                            ? colors.negative
+                            : colors.textSecondary,
+                        }]}>
+                          {item.facts.forecast.direction}
+                        </Text>
+                      </View>
+                      <View style={styles.factsRow}>
+                        <Text style={styles.factsLabel}>Predicted level</Text>
+                        <Text style={styles.factsValue}>{item.facts.forecast.day30_pred} m</Text>
+                      </View>
+                      <View style={styles.factsRow}>
+                        <Text style={styles.factsLabel}>30d change</Text>
+                        <Text style={[styles.factsValue, {
+                          color: item.facts.forecast.change_30d_pred > 0 ? colors.positive : colors.negative,
+                        }]}>
+                          {item.facts.forecast.change_30d_pred > 0 ? "+" : ""}
+                          {item.facts.forecast.change_30d_pred} m
+                        </Text>
+                      </View>
+                      <View style={styles.factsRow}>
+                        <Text style={styles.factsLabel}>90% band</Text>
+                        <Text style={styles.factsValue}>±{item.facts.forecast.band_half} m</Text>
+                      </View>
+                      <View style={styles.factsRow}>
+                        <Text style={styles.factsLabel}>Plausible</Text>
+                        <Text style={[styles.factsValue, {
+                          color: item.facts.forecast.plausible ? colors.positive : colors.warning,
+                        }]}>
+                          {item.facts.forecast.plausible ? "Yes" : "No — exercise caution"}
+                        </Text>
+                      </View>
+                      {item.facts.forecast.high_uncertainty && (
+                        <View style={styles.factsRow}>
+                          <Text style={styles.factsLabel}>Confidence</Text>
+                          <Text style={[styles.factsValue, { color: colors.warning }]}>
+                            High uncertainty (stride RMSE {item.facts.forecast.station_stride_rmse} m)
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  )}
                 </View>
               )}
             </View>
@@ -422,7 +509,18 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
     borderTopWidth: 1,
     borderTopColor: colors.divider,
+    gap: spacing.md,
+  },
+  factsSection: {
     gap: spacing.xs,
+  },
+  factsSectionTitle: {
+    ...typography.caption,
+    color: colors.textMuted,
+    fontSize: 10,
+    textTransform: "uppercase",
+    fontWeight: "700",
+    marginBottom: spacing.xs,
   },
   factsRow: {
     flexDirection: "row",

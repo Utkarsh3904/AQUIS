@@ -1,5 +1,4 @@
-// ml-build-spec §12.3 — API_BASE points at Node backend (:3000)
-// Switch to real endpoint by setting EXPO_PUBLIC_API_URL in .env
-// Zero code changes needed — just set the variable and restart dev server
-export const API_BASE = process.env.EXPO_PUBLIC_API_URL || "";
-export const USE_MOCKS = !API_BASE;
+// ml-build-spec §12.3 — API_BASE points at ML service
+// Set EXPO_PUBLIC_API_URL in .env to override the default
+export const API_BASE = process.env.EXPO_PUBLIC_API_URL || "https://pharmaceutical-raise-edges-soccer.trycloudflare.com";
+export const USE_MOCKS = process.env.EXPO_PUBLIC_USE_MOCKS === "true";

@@ -27,18 +27,22 @@ export interface StationRow {
 }
 
 // ml-build-spec §10.4 — _forecast_summary(station) computed fields
+// Real API shape from POST /assistant/chat → facts.forecast
 export interface StationForecast {
   anchor: number;
-  pred_xgb: number;
   day30_pred: number;
   change_30d_pred: number;
-  direction: string;
+  direction: string; // "expected rise" | "expected decline" | "stable"
   plausible: boolean;
   band_half: number;
   q05_level: number;
   q95_level: number;
   station_stride_rmse: number;
   high_uncertainty: boolean;
+  // Optional fields present in real response
+  level?: number;
+  obs_max?: number;
+  obs_min?: number;
 }
 
 // ml-build-spec §10.4 + §10.7 — facts dict (station detail KPIs)

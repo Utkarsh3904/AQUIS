@@ -1,9 +1,18 @@
 import React from "react";
-import { View, Text, StyleSheet, StatusBar } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, StatusBar } from "react-native";
+import { useRouter } from "expo-router";
 import { colors, typography } from "../theme/colors";
 import { spacing, radii } from "../theme/spacing";
+import { saveOnboardingPersona } from "../lib/onboarding";
 
 export default function PublicPlaceholderScreen() {
+  const router = useRouter();
+
+  const handleSwitch = async () => {
+    await saveOnboardingPersona("researcher");
+    router.replace("/(tabs)");
+  };
+
   return (
     <View style={styles.screen}>
       <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
@@ -16,6 +25,13 @@ export default function PublicPlaceholderScreen() {
           The public view is under construction. Check back soon for
           groundwater level information in your area.
         </Text>
+        <TouchableOpacity
+          style={styles.switchButton}
+          onPress={handleSwitch}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.switchText}>Switch to Researcher →</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -57,5 +73,17 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: "center",
     lineHeight: 22,
+  },
+  switchButton: {
+    backgroundColor: colors.primary,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+    marginTop: spacing.sm,
+  },
+  switchText: {
+    ...typography.labelMd,
+    color: colors.onPrimary,
+    fontWeight: "600",
   },
 });

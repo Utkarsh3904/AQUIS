@@ -25,7 +25,10 @@ export function formatIstShort(iso: string): string {
 
 /** "2 hours ago" relative time (from now) */
 export function formatRelativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
+  if (!iso) return "—";
+  const ts = new Date(iso).getTime();
+  if (isNaN(ts)) return "—";
+  const diff = Date.now() - ts;
   if (diff < 0) return "just now";
   if (diff < 60_000) return "just now";
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;

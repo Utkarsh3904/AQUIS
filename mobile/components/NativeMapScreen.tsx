@@ -3,14 +3,15 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { View, Text, ActivityIndicator, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
-import { useStations } from "../../lib/hooks";
-import { getStationPinColor, UP_REGION } from "../../lib/mapUtils";
-import { colors, typography } from "../../theme/colors";
-import { spacing, radii } from "../../theme/spacing";
+import { useStations } from "../lib/hooks";
+import { getStationPinColor, UP_REGION } from "../lib/mapUtils";
+import { colors, typography } from "../theme/colors";
+import { spacing, radii } from "../theme/spacing";
+import type { StationListItem } from "../types/station";
 
-let MapViewComp = null;
-let MarkerComp = null;
-let PROVIDER_DEFAULT = null;
+let MapViewComp: any = null;
+let MarkerComp: any = null;
+let PROVIDER_DEFAULT: any = null;
 
 export default function NativeMapScreen() {
   const router = useRouter();
@@ -30,9 +31,9 @@ export default function NativeMapScreen() {
     }
   }, []);
 
-  const hasCoords = stations.some((s) => s.lat !== 0 || s.lon !== 0);
+  const hasCoords = stations.some((s: StationListItem) => s.lat !== 0 || s.lon !== 0);
 
-  const getCoord = useCallback((s) => ({ latitude: s.lat, longitude: s.lon }), []);
+  const getCoord = useCallback((s: StationListItem) => ({ latitude: s.lat, longitude: s.lon }), []);
 
   if (!ready || !MapViewComp) {
     return (
@@ -66,13 +67,13 @@ export default function NativeMapScreen() {
       showsMyLocationButton={false}
       onMapReady={() => setReady(true)}
     >
-      {stations.map((station) => (
+      {stations.map((station: StationListItem) => (
         <MarkerComp
           key={String(station.id ?? station.slug)}
           coordinate={getCoord(station)}
           title={station.station}
           description={station.district}
-          pinColor={getStationPinColor(station)}
+          pinColor={getStationPinColor(station, undefined)}
           onCalloutPress={() => {
             const param = station.slug ?? String(station.id);
             router.push(`/station/${param}`);

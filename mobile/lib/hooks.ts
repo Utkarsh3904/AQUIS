@@ -21,15 +21,20 @@ export function useStations() {
   const [data, setData] = useState<StationListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<HookError | null>(null);
+  const [fetchKey, setFetchKey] = useState(0);
 
   useEffect(() => {
+    setLoading(true);
+    setError(null);
     fetchStationList()
       .then(setData)
       .catch((e: ApiRequestError) => setError(toHookError(e)))
       .finally(() => setLoading(false));
-  }, []);
+  }, [fetchKey]);
 
-  return { data, loading, error };
+  const refetch = () => setFetchKey((k) => k + 1);
+
+  return { data, loading, error, refetch };
 }
 
 export function useStationFacts(id: number | null) {
@@ -54,6 +59,7 @@ export function useStationFactsBySlug(slug: string | null) {
   const [data, setData] = useState<StationFacts | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<HookError | null>(null);
+  const [fetchKey, setFetchKey] = useState(0);
 
   useEffect(() => {
     if (!slug) {
@@ -66,15 +72,18 @@ export function useStationFactsBySlug(slug: string | null) {
       .then(setData)
       .catch((e: ApiRequestError) => setError(toHookError(e)))
       .finally(() => setLoading(false));
-  }, [slug]);
+  }, [slug, fetchKey]);
 
-  return { data, loading, error };
+  const refetch = () => setFetchKey((k) => k + 1);
+
+  return { data, loading, error, refetch };
 }
 
 export function useForecast(slug: string | null) {
   const [data, setData] = useState<ForecastResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<HookError | null>(null);
+  const [fetchKey, setFetchKey] = useState(0);
 
   useEffect(() => {
     if (!slug) {
@@ -87,9 +96,11 @@ export function useForecast(slug: string | null) {
       .then(setData)
       .catch((e: ApiRequestError) => setError(toHookError(e)))
       .finally(() => setLoading(false));
-  }, [slug]);
+  }, [slug, fetchKey]);
 
-  return { data, loading, error };
+  const refetch = () => setFetchKey((k) => k + 1);
+
+  return { data, loading, error, refetch };
 }
 
 export function useTrend(stationId: number | null) {

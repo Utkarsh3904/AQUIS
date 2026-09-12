@@ -17,8 +17,8 @@ export default function StationDetailScreen() {
   const { slug } = useLocalSearchParams<{ slug: string }>();
   const router = useRouter();
 
-  const { data: station, loading: stationLoading, error: stationError } = useStations();
-  const { data: facts, loading: factsLoading, error: factsError } = useStationFactsBySlug(slug ?? null);
+  const { data: station, loading: stationLoading, error: stationError, refetch: refetchStation } = useStations();
+  const { data: facts, loading: factsLoading, error: factsError, refetch: refetchFacts } = useStationFactsBySlug(slug ?? null);
 
   const currentStation = station?.find((s) => s.slug === slug) ?? null;
   const loading = stationLoading || factsLoading;
@@ -46,6 +46,7 @@ export default function StationDetailScreen() {
         <EmptyState
           title={error.status === 404 ? "Station not found" : "Station unavailable"}
           message={error.body?.detail ?? error.body?.error ?? "Unknown error"}
+          onRetry={() => { refetchStation(); refetchFacts(); }}
         />
       </View>
     );
@@ -164,12 +165,12 @@ export default function StationDetailScreen() {
             <Text style={styles.statsSectionTitle}>Key Statistics</Text>
             <View style={styles.statsGrid}>
               {[
-                { value: `${facts.change_7d > 0 ? "+" : ""}${facts.change_7d}`, label: "7d change", unit: "m", color: facts.change_7d > 0 ? colors.positive : facts.change_7d < 0 ? colors.negative : colors.textPrimary },
-                { value: `${facts.change_30d > 0 ? "+" : ""}${facts.change_30d}`, label: "30d change", unit: "m", color: facts.change_30d > 0 ? colors.positive : facts.change_30d < 0 ? colors.negative : colors.textPrimary },
-                { value: `${facts.change_60d > 0 ? "+" : ""}${facts.change_60d}`, label: "60d change", unit: "m", color: facts.change_60d > 0 ? colors.positive : facts.change_60d < 0 ? colors.negative : colors.textPrimary },
-                { value: `${facts.change_180d > 0 ? "+" : ""}${facts.change_180d}`, label: "180d change", unit: "m", color: facts.change_180d > 0 ? colors.positive : facts.change_180d < 0 ? colors.negative : colors.textPrimary },
-                { value: facts.min.toFixed(2), label: "All-time low", unit: "m", color: colors.textPrimary },
-                { value: facts.max.toFixed(2), label: "All-time high", unit: "m", color: colors.textPrimary },
+                { value: `${(facts.change_7d ?? 0) > 0 ? "+" : ""}${facts.change_7d ?? "—"}`, label: "7d change", unit: "m", color: (facts.change_7d ?? 0) > 0 ? colors.positive : (facts.change_7d ?? 0) < 0 ? colors.negative : colors.textPrimary },
+                { value: `${(facts.change_30d ?? 0) > 0 ? "+" : ""}${facts.change_30d ?? "—"}`, label: "30d change", unit: "m", color: (facts.change_30d ?? 0) > 0 ? colors.positive : (facts.change_30d ?? 0) < 0 ? colors.negative : colors.textPrimary },
+                { value: `${(facts.change_60d ?? 0) > 0 ? "+" : ""}${facts.change_60d ?? "—"}`, label: "60d change", unit: "m", color: (facts.change_60d ?? 0) > 0 ? colors.positive : (facts.change_60d ?? 0) < 0 ? colors.negative : colors.textPrimary },
+                { value: `${(facts.change_180d ?? 0) > 0 ? "+" : ""}${facts.change_180d ?? "—"}`, label: "180d change", unit: "m", color: (facts.change_180d ?? 0) > 0 ? colors.positive : (facts.change_180d ?? 0) < 0 ? colors.negative : colors.textPrimary },
+                { value: facts.min?.toFixed(2) ?? "—", label: "All-time low", unit: "m", color: colors.textPrimary },
+                { value: facts.max?.toFixed(2) ?? "—", label: "All-time high", unit: "m", color: colors.textPrimary },
                 { value: `${facts.span?.toFixed(2) ?? "—"}`, label: "Range", unit: "m", color: colors.textPrimary },
                 { value: (facts.n_obs ?? 0).toLocaleString(), label: "Observations", unit: "", color: colors.textPrimary },
                 { value: String(facts.outliers ?? 0), label: "Outliers excluded", unit: "", color: (facts.outliers ?? 0) > 10 ? colors.warning : colors.textPrimary },
@@ -192,17 +193,17 @@ export default function StationDetailScreen() {
             <View style={styles.infoCard}>
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>District</Text>
-                <Text style={styles.infoValue}>{facts.district}</Text>
+                <Text style={styles.infoValue}>{facts.district ?? currentStation.district}</Text>
               </View>
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>District median</Text>
-                <Text style={styles.infoValue}>{facts.district_context.median} m</Text>
+                <Text style={styles.infoValue}>{facts.district_context.median?.toFixed(2) ?? "—"} m</Text>
               </View>
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Stations analysed</Text>
-                <Text style={styles.infoValue}>{facts.district_context.n_stations}</Text>
+                <Text style={styles.infoValue}>{facts.district_context.n_stations ?? "—"}</Text>
               </View>
-              {facts.last != null && (
+              {facts.last != null && facts.district_context.median != null && (
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>vs. district</Text>
                   <Text style={[styles.infoValue, {

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import {
   View,
   Text,
@@ -11,16 +11,21 @@ import {
   Platform,
   ScrollView,
 } from "react-native";
+import { useRouter } from "expo-router";
 import { colors, typography } from "../../theme/colors";
 import { spacing, radii } from "../../theme/spacing";
 import { postAssistantChat } from "../../lib/api";
+import { useStations } from "../../lib/hooks";
 import type { AssistantResponse } from "../../types/assistant";
+import type { StationFacts } from "../../types/station";
 
 interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
   facts?: AssistantResponse["facts"];
+  stationName?: string;
+  mentions?: string[];
 }
 
 const SUGGESTED_QUESTIONS = [
@@ -60,6 +65,8 @@ export default function AssistantScreen() {
         role: "assistant",
         text: res.answer,
         facts: res.facts,
+        stationName: res.station,
+        mentions: res.mentions,
       };
       setMessages((prev) => [...prev, assistantMsg]);
     } catch {
@@ -174,6 +181,13 @@ export default function AssistantScreen() {
               {/* Facts panel */}
               {item.facts && typeof item.facts === "object" && "last" in item.facts && (
                 <View style={styles.factsPanel}>
+                  {/* ── Station header ── */}
+                  {item.stationName && (
+                    <View style={styles.factsStationHeader}>
+                      <Text style={styles.factsStationName}>{item.stationName}</Text>
+                    </View>
+                  )}
+
                   {/* ── Current level ── */}
                   <View style={styles.factsSection}>
                     <Text style={styles.factsSectionTitle}>Observed Level</Text>
@@ -288,7 +302,109 @@ export default function AssistantScreen() {
                       )}
                     </View>
                   )}
+
+                  {/* ── Primary drivers ── */}
+                  {item.facts.drivers && item.facts.drivers.length > 0 && (
+                    <View style={styles.factsSection}>
+                      <Text style={styles.factsSectionTitle}>Primary Drivers</Text>
+                      {item.facts.drivers.slice(0, 3).map((d: { driver: string; corr: number }, i: number) => (
+                        <View key={i} style={styles.factsRow}>
+                          <Text style={styles.factsLabel}>{d.driver}</Text>
+                          <Text style={styles.factsValue}>
+                            r = {d.corr > 0 ? "+" : ""}{d.corr.toFixed(2)}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {/* ── Recent rainfall ── */}
+                  {item.facts.rain_recent && (
+                    <View style={styles.factsSection}>
+                      <Text style={styles.factsSectionTitle}>Recent Rainfall</Text>
+                      <View style={styles.factsRow}>
+                        <Text style={styles.factsLabel}>Last rain</Text>
+                        <Text style={styles.factsValue}>{item.facts.rain_recent.last_rain_date}</Text>
+                      </View>
+                      <View style={styles.factsRow}>
+                        <Text style={styles.factsLabel}>7-day</Text>
+                        <Text style={styles.factsValue}>{item.facts.rain_recent.rain_7d} mm</Text>
+                      </View>
+                      <View style={styles.factsRow}>
+                        <Text style={styles.factsLabel}>30-day</Text>
+                        <Text style={styles.factsValue}>{item.facts.rain_recent.rain_30d} mm</Text>
+                      </View>
+                      <View style={styles.factsRow}>
+                        <Text style={styles.factsLabel}>90-day</Text>
+                        <Text style={styles.factsValue}>{item.facts.rain_recent.rain_90d} mm</Text>
+                      </View>
+                    </View>
+                  )}
+
+                  {/* ── Precautions ── */}
+                  {item.facts.precautions && item.facts.precautions.length > 0 && (
+                    <View style={styles.factsSection}>
+                      <Text style={styles.factsSectionTitle}>Precautions</Text>
+                      {item.facts.precautions.map((p: { level: string; title: string; why: string }, i: number) => (
+                        <View key={i} style={[styles.precautionRow, {
+                          backgroundColor: p.level === "warning" ? colors.warning + "18" : colors.primary + "18",
+                        }]}>
+                          <Text style={[styles.precautionTitle, {
+                            color: p.level === "warning" ? colors.warning : colors.primary,
+                          }]}>
+                            {p.level === "warning" ? "⚠" : "ℹ"} {p.title}
+                          </Text>
+                          <Text style={styles.precautionWhy}>{p.why}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {/* ── Richer district context ── */}
+                  {item.facts.district_context && (
+                    <View style={styles.factsSection}>
+                      <Text style={styles.factsSectionTitle}>District Overview</Text>
+                      <View style={styles.factsRow}>
+                        <Text style={styles.factsLabel}>Median</Text>
+                        <Text style={styles.factsValue}>{item.facts.district_context.median?.toFixed(2) ?? "—"} m</Text>
+                      </View>
+                      <View style={styles.factsRow}>
+                        <Text style={styles.factsLabel}>Mean</Text>
+                        <Text style={styles.factsValue}>{item.facts.district_context.mean?.toFixed(2) ?? "—"} m</Text>
+                      </View>
+                      <View style={styles.factsRow}>
+                        <Text style={styles.factsLabel}>Range</Text>
+                        <Text style={styles.factsValue}>
+                          {item.facts.district_context.min_level?.toFixed(1) ?? "—"} to {item.facts.district_context.max_level?.toFixed(1) ?? "—"} m
+                        </Text>
+                      </View>
+                      <View style={styles.factsRow}>
+                        <Text style={styles.factsLabel}>Stations</Text>
+                        <Text style={styles.factsValue}>{item.facts.district_context.n_analysed ?? item.facts.district_context.n_stations}</Text>
+                      </View>
+                    </View>
+                  )}
+
+                  {/* ── Data freshness ── */}
+                  {item.facts.fleet_recency && (
+                    <View style={styles.factsSection}>
+                      <Text style={styles.factsSectionTitle}>Data Freshness</Text>
+                      <View style={styles.factsRow}>
+                        <Text style={styles.factsLabel}>Latest observation</Text>
+                        <Text style={styles.factsValue}>{item.facts.fleet_recency.latest_date}</Text>
+                      </View>
+                      <View style={styles.factsRow}>
+                        <Text style={styles.factsLabel}>Stations with data</Text>
+                        <Text style={styles.factsValue}>{item.facts.fleet_recency.stations_with_data}</Text>
+                      </View>
+                    </View>
+                  )}
                 </View>
+              )}
+
+              {/* ── Mentioned stations ── */}
+              {item.mentions && item.mentions.length > 0 && (
+                <MentionChips mentions={item.mentions} facts={item.facts} />
               )}
             </View>
           )}
@@ -343,6 +459,62 @@ export default function AssistantScreen() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+    </View>
+  );
+}
+
+function MentionChips({
+  mentions,
+  facts,
+}: {
+  mentions: string[];
+  facts?: AssistantResponse["facts"];
+}) {
+  const router = useRouter();
+  const { data: stations } = useStations();
+
+  const stationNames = useMemo(() => {
+    if (facts && "station_names" in facts && Array.isArray(facts.station_names)) {
+      return facts.station_names;
+    }
+    return [];
+  }, [facts]);
+
+  const resolved = useMemo(() => {
+    return mentions.map((name) => {
+      const isStation = stationNames.some(
+        (sn) => sn.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(sn.toLowerCase())
+      );
+      if (!isStation) return { name, slug: null, found: false };
+      const match = stations.find(
+        (s) => s.station.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(s.station.toLowerCase())
+      );
+      if (!match?.slug) return { name, slug: null, found: false };
+      return { name, slug: match.slug, found: true };
+    });
+  }, [mentions, stationNames, stations]);
+
+  const stationMentions = resolved.filter((r) => r.found || stationNames.length > 0);
+  if (stationMentions.length === 0) return null;
+
+  return (
+    <View style={styles.mentionsContainer}>
+      <Text style={styles.mentionsLabel}>Mentioned stations</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mentionsScroll}>
+        {stationMentions.map((r) => (
+          <TouchableOpacity
+            key={r.name}
+            style={[styles.mentionChip, !r.found && styles.mentionChipDisabled]}
+            onPress={() => r.found && r.slug && router.push(`/station/${r.slug}`)}
+            disabled={!r.found}
+            activeOpacity={r.found ? 0.7 : 1}
+          >
+            <Text style={[styles.mentionChipText, !r.found && styles.mentionChipTextDisabled]}>
+              {r.name}{r.found ? " ›" : " (not in dataset)"}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
     </View>
   );
 }
@@ -534,6 +706,66 @@ const styles = StyleSheet.create({
     ...typography.caption,
     fontWeight: "600",
     color: colors.textPrimary,
+  },
+  precautionRow: {
+    borderRadius: radii.sm,
+    padding: spacing.md,
+    gap: spacing.xs,
+  },
+  precautionTitle: {
+    ...typography.caption,
+    fontWeight: "700",
+  },
+  precautionWhy: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  factsStationHeader: {
+    marginBottom: spacing.xs,
+  },
+  factsStationName: {
+    ...typography.subheading,
+    color: colors.textPrimary,
+    fontSize: 13,
+  },
+  mentionsContainer: {
+    marginTop: spacing.sm,
+    gap: spacing.xs,
+  },
+  mentionsLabel: {
+    ...typography.caption,
+    color: colors.textMuted,
+    fontSize: 10,
+    textTransform: "uppercase",
+    fontWeight: "700",
+    paddingHorizontal: spacing.lg,
+  },
+  mentionsScroll: {
+    paddingHorizontal: spacing.lg,
+    gap: spacing.xs,
+  },
+  mentionChip: {
+    backgroundColor: colors.primary + "18",
+    borderRadius: radii.full,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.primary + "30",
+  },
+  mentionChipDisabled: {
+    backgroundColor: colors.divider,
+    borderColor: colors.border,
+  },
+  mentionChipText: {
+    ...typography.caption,
+    color: colors.primary,
+    fontWeight: "600",
+    fontSize: 12,
+  },
+  mentionChipTextDisabled: {
+    color: colors.textMuted,
   },
   typingIndicator: {
     paddingHorizontal: spacing.lg,

@@ -18,6 +18,9 @@ const CONFIDENCE_COLORS: Record<string, string> = {
   HIGH: colors.positive,
   DIRECTIONAL: colors.warning,
   LOW: colors.negative,
+  high: colors.positive,
+  directional: colors.warning,
+  low: colors.negative,
 };
 
 const DIRECTION_COLORS: Record<string, string> = {
@@ -29,7 +32,7 @@ const DIRECTION_COLORS: Record<string, string> = {
 export default function ForecastScreen() {
   const { slug } = useLocalSearchParams<{ slug: string }>();
   const router = useRouter();
-  const { data: forecast, loading, error } = useForecast(slug ?? null);
+  const { data: forecast, loading, error, refetch } = useForecast(slug ?? null);
   const [selectedPoint, setSelectedPoint] = useState<number | null>(null);
 
   if (loading) {
@@ -59,23 +62,25 @@ export default function ForecastScreen() {
             <Text style={styles.backBtn}>← Back</Text>
           </TouchableOpacity>
         </View>
-        <EmptyState title={errorTitle} message={errorMessage} />
+        <EmptyState title={errorTitle} message={errorMessage} onRetry={refetch} />
       </View>
     );
   }
 
   // ── Chart data: subsample every 4th point (120 → 30 visual points, one/day)
-  const chartPoints = forecast.trajectory.filter((_, i) => i % 4 === 0);
+  const chartPoints = (forecast.trajectory ?? []).filter((_, i) => i % 4 === 0);
   const allChartValues = chartPoints.flatMap((p) => [p.q05, p.q95, p.q50]);
-  const minVal = Math.min(...allChartValues, forecast.anchor_gwl);
-  const maxVal = Math.max(...allChartValues, forecast.anchor_gwl);
+  const minVal = allChartValues.length > 0 ? Math.min(...allChartValues, forecast.anchor_gwl) : forecast.anchor_gwl;
+  const maxVal = allChartValues.length > 0 ? Math.max(...allChartValues, forecast.anchor_gwl) : forecast.anchor_gwl;
   const range = maxVal - minVal || 1;
 
-  const dirColor = DIRECTION_COLORS[forecast.direction.label] ?? colors.textSecondary;
+  const dirLabel = forecast.direction?.label ?? "stable";
+  const dirColor = DIRECTION_COLORS[dirLabel] ?? colors.textSecondary;
+  const confLevel = forecast.overall_confidence?.level ?? "LOW";
   const confColor =
-    CONFIDENCE_COLORS[forecast.overall_confidence.level] ?? colors.textMuted;
+    CONFIDENCE_COLORS[confLevel] ?? colors.textMuted;
 
-  const changeSign = forecast.direction.change_q50_30d > 0 ? "+" : "";
+  const changeSign = (forecast.direction?.change_q50_30d ?? 0) > 0 ? "+" : "";
 
   return (
     <View style={styles.screen}>
@@ -98,8 +103,8 @@ export default function ForecastScreen() {
             <Text
               style={[styles.headlineDirection, { color: dirColor }]}
             >
-              {forecast.direction.label.charAt(0).toUpperCase() +
-                forecast.direction.label.slice(1)}
+              {dirLabel.charAt(0).toUpperCase() +
+                dirLabel.slice(1)}
             </Text>
             <View
               style={[
@@ -108,12 +113,12 @@ export default function ForecastScreen() {
               ]}
             >
               <Text style={[styles.confidenceBadgeText, { color: confColor }]}>
-                {forecast.overall_confidence.level}
+                {confLevel}
               </Text>
             </View>
           </View>
           <Text style={styles.headlineReason}>
-            {forecast.overall_confidence.reason}
+            {forecast.overall_confidence?.reason ?? ""}
           </Text>
           <View style={styles.anchorRow}>
             <Text style={styles.anchorLabel}>Anchor</Text>
@@ -167,7 +172,8 @@ export default function ForecastScreen() {
             <View style={styles.chartDots}>
               {chartPoints.map((p, i) => {
                 const y = ((p.q50 - minVal) / range) * 100;
-                const dotColor = CONFIDENCE_COLORS[p.confidence_level] ?? colors.textMuted;
+                const normalizedConf = (p.confidence_level ?? "").toUpperCase();
+                const dotColor = CONFIDENCE_COLORS[normalizedConf] ?? CONFIDENCE_COLORS[p.confidence_level] ?? colors.textMuted;
                 return (
                   <TouchableOpacity
                     key={i}
@@ -180,10 +186,10 @@ export default function ForecastScreen() {
                         styles.chartDot,
                         {
                           backgroundColor: dotColor,
-                          width: selectedPoint === i ? 9 : 5,
-                          height: selectedPoint === i ? 9 : 5,
-                          marginLeft: selectedPoint === i ? -4.5 : -2.5,
-                          borderRadius: selectedPoint === i ? 4.5 : 2.5,
+                          width: selectedPoint === i ? 11 : 7,
+                          height: selectedPoint === i ? 11 : 7,
+                          marginLeft: selectedPoint === i ? -5.5 : -3.5,
+                          borderRadius: selectedPoint === i ? 5.5 : 3.5,
                         },
                       ]}
                     />
@@ -204,12 +210,16 @@ export default function ForecastScreen() {
             </View>
           </View>
           <View style={styles.chartLabels}>
-            <Text style={styles.chartLabelText}>
-              {formatIstShort(chartPoints[0].time)}
-            </Text>
-            <Text style={styles.chartLabelText}>
-              {formatIstShort(chartPoints[chartPoints.length - 1].time)}
-            </Text>
+            {chartPoints.length > 0 && (
+              <>
+                <Text style={styles.chartLabelText}>
+                  {formatIstShort(chartPoints[0].time)}
+                </Text>
+                <Text style={styles.chartLabelText}>
+                  {formatIstShort(chartPoints[chartPoints.length - 1].time)}
+                </Text>
+              </>
+            )}
           </View>
 
           {/* Selected point info panel */}
@@ -235,11 +245,17 @@ export default function ForecastScreen() {
               </View>
               <View style={styles.pointInfoRow}>
                 <Text style={styles.pointInfoLabel}>Confidence</Text>
-                <View style={[styles.pointConfBadge, { backgroundColor: CONFIDENCE_COLORS[chartPoints[selectedPoint].confidence_level] + "18" }]}>
-                  <Text style={[styles.pointConfText, { color: CONFIDENCE_COLORS[chartPoints[selectedPoint].confidence_level] }]}>
-                    {chartPoints[selectedPoint].confidence_level}
-                  </Text>
-                </View>
+                {(() => {
+                  const selConf = (chartPoints[selectedPoint].confidence_level ?? "").toUpperCase();
+                  const selConfColor = CONFIDENCE_COLORS[selConf] ?? CONFIDENCE_COLORS[chartPoints[selectedPoint].confidence_level] ?? colors.textMuted;
+                  return (
+                    <View style={[styles.pointConfBadge, { backgroundColor: selConfColor + "18" }]}>
+                      <Text style={[styles.pointConfText, { color: selConfColor }]}>
+                        {chartPoints[selectedPoint].confidence_level}
+                      </Text>
+                    </View>
+                  );
+                })()}
               </View>
               <View style={styles.pointInfoRow}>
                 <Text style={styles.pointInfoLabel}>Driver source</Text>
@@ -264,7 +280,7 @@ export default function ForecastScreen() {
             <View style={styles.summaryStat}>
               <Text style={styles.summaryStatLabel}>Level</Text>
               <Text style={styles.summaryStatValue}>
-                {forecast.trajectory_30d.level.toFixed(2)} m
+                {forecast.trajectory_30d?.level?.toFixed(2) ?? "—"} m
               </Text>
             </View>
             <View style={styles.summaryDivider} />
@@ -275,24 +291,24 @@ export default function ForecastScreen() {
                   styles.summaryStatValue,
                   {
                     color:
-                      forecast.direction.label === "expected rise"
+                      dirLabel === "expected rise"
                         ? colors.positive
-                        : forecast.direction.label === "expected decline"
+                        : dirLabel === "expected decline"
                         ? colors.negative
                         : colors.textPrimary,
                   },
                 ]}
               >
                 {changeSign}
-                {forecast.trajectory_30d.change.toFixed(2)} m
+                {forecast.trajectory_30d?.change?.toFixed(2) ?? "—"} m
               </Text>
             </View>
             <View style={styles.summaryDivider} />
             <View style={styles.summaryStat}>
               <Text style={styles.summaryStatLabel}>90% Band</Text>
               <Text style={styles.summaryStatValue}>
-                {forecast.trajectory_30d.q05.toFixed(2)} to{" "}
-                {forecast.trajectory_30d.q95.toFixed(2)}
+                {forecast.trajectory_30d?.q05?.toFixed(2) ?? "—"} to{" "}
+                {forecast.trajectory_30d?.q95?.toFixed(2) ?? "—"}
               </Text>
             </View>
           </View>
@@ -321,7 +337,7 @@ export default function ForecastScreen() {
                     styles.evidenceBadge,
                     {
                       backgroundColor:
-                        (forecast.evidence.station_integrity.integrity >= 0.6
+                        ((forecast.evidence?.station_integrity?.integrity ?? 0) >= 0.6
                           ? colors.positive
                           : colors.negative) + "18",
                     },
@@ -332,37 +348,37 @@ export default function ForecastScreen() {
                       styles.evidenceBadgeText,
                       {
                         color:
-                          forecast.evidence.station_integrity.integrity >= 0.6
+                          (forecast.evidence?.station_integrity?.integrity ?? 0) >= 0.6
                             ? colors.positive
                             : colors.negative,
                       },
                     ]}
                   >
-                    {(forecast.evidence.station_integrity.integrity * 100).toFixed(0)}%
+                    {((forecast.evidence?.station_integrity?.integrity ?? 0) * 100).toFixed(0)}%
                   </Text>
                 </View>
               </View>
               <Text style={styles.evidenceSubtext}>
-                {forecast.evidence.station_integrity.integrity_reason}
+                {forecast.evidence?.station_integrity?.integrity_reason ?? ""}
               </Text>
             </View>
             <View style={styles.evidenceItem}>
               <Text style={styles.evidenceLabel}>Recency</Text>
               <Text style={styles.evidenceValue}>
-                {forecast.evidence.recency_days}d ago
+                {forecast.evidence?.recency_days ?? "—"}d ago
               </Text>
               <Text style={styles.evidenceSubtext}>
-                {(forecast.evidence.recent90_coverage * 100).toFixed(0)}% 90d
+                {((forecast.evidence?.recent90_coverage ?? 0) * 100).toFixed(0)}% 90d
                 coverage
               </Text>
             </View>
             <View style={styles.evidenceItem}>
               <Text style={styles.evidenceLabel}>Stability</Text>
               <Text style={styles.evidenceValue}>
-                {forecast.evidence.stability_oscillation} flips
+                {forecast.evidence?.stability_oscillation ?? "—"} flips
               </Text>
               <Text style={styles.evidenceSubtext}>
-                {forecast.evidence.station_integrity.stability >= 1.0
+                {(forecast.evidence?.station_integrity?.stability ?? 0) >= 1.0
                   ? "Stable trajectory"
                   : "Oscillating"}
               </Text>
@@ -373,16 +389,16 @@ export default function ForecastScreen() {
                 style={[
                   styles.evidenceValue,
                   {
-                    color: forecast.evidence.anchor_ood
+                    color: forecast.evidence?.anchor_ood
                       ? colors.warning
                       : colors.positive,
                   },
                 ]}
               >
-                {forecast.evidence.anchor_ood ? "Yes" : "No"}
+                {forecast.evidence?.anchor_ood ? "Yes" : "No"}
               </Text>
               <Text style={styles.evidenceSubtext}>
-                {forecast.evidence.anchor_ood
+                {forecast.evidence?.anchor_ood
                   ? "Outside training range"
                   : "Within training range"}
               </Text>
@@ -397,6 +413,20 @@ export default function ForecastScreen() {
           {forecast.direction.sign_accuracy_30d != null && (
             <Text style={styles.modelSubtext}>
               Sign accuracy: {(forecast.direction.sign_accuracy_30d * 100).toFixed(0)}%
+            </Text>
+          )}
+          {forecast.direction.agreement_with_production != null && (
+            <Text style={[styles.modelSubtext, {
+              color: forecast.direction.agreement_with_production ? colors.positive : colors.warning,
+            }]}>
+              {forecast.direction.agreement_with_production
+                ? "Agrees with production model"
+                : "Differs from production model"}
+            </Text>
+          )}
+          {forecast.overall_confidence.endpoint_match != null && (
+            <Text style={styles.modelSubtext}>
+              Endpoint match: {forecast.overall_confidence.endpoint_match ? "Yes" : "No"}
             </Text>
           )}
         </View>
@@ -521,6 +551,7 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 1,
     position: "relative",
+    zIndex: 0,
   },
   chartColumn: {
     flex: 1,
@@ -540,6 +571,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     flexDirection: "row",
+    zIndex: 1,
   },
   chartDot: {
     position: "absolute",
@@ -550,7 +582,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 0,
     right: 0,
-    height: 20,
+    height: 24,
     justifyContent: "center",
   },
   anchorLine: {

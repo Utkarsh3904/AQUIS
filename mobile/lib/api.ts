@@ -60,7 +60,7 @@ export function mapStationRow(row: StationRow): StationListItem {
 // Mock path returns raw DB rows normalized via mapStationRow
 export async function fetchStationList(): Promise<StationListItem[]> {
   if (USE_MOCKS) return mockStationRows.map(mapStationRow);
-  const res = await apiFetch<MlStationListResponse>("/stations");
+  const res = await apiFetch<MlStationListResponse>("/stations?limit=2000");
   return res.stations.map((s) => ({
     id: 0, // ML service doesn't provide numeric IDs — slug is the identifier
     station: s.station,

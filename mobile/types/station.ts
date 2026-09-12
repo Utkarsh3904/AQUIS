@@ -59,4 +59,10 @@ export interface StationFacts {
   n_obs: number;
   outliers: number;
   forecast: StationForecast;
+  // Extra fields from real API (GET /stations/<slug>)
+  district?: string;
+  district_context?: {
+    median: number | null;
+    n_stations: number | null;
+  };
 }

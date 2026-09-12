@@ -1,29 +1,48 @@
 import React from "react";
 import { Tabs } from "expo-router";
 import { colors, typography } from "../../theme/colors";
-import { Text } from "react-native";
+import { Text, View } from "react-native";
+
+function MapIcon({ color, size }: { color: string; size: number }) {
+  return (
+    <Text style={{ fontSize: size, color }}>
+      ◎
+    </Text>
+  );
+}
 
 function WatchlistIcon({ color, size }: { color: string; size: number }) {
   return (
-    <Text style={{ fontSize: size, color, fontWeight: "600" }}>
+    <Text style={{ fontSize: size, color }}>
       ☰
     </Text>
   );
 }
 
-function MapIcon({ color, size }: { color: string; size: number }) {
+function ForecastIcon({ color, size }: { color: string; size: number }) {
   return (
-    <Text style={{ fontSize: size, color, fontWeight: "600" }}>
-      ◉
+    <Text style={{ fontSize: size, color }}>
+      📈
     </Text>
   );
 }
 
 function AssistantIcon({ color, size }: { color: string; size: number }) {
   return (
-    <Text style={{ fontSize: size, color, fontWeight: "700" }}>
-      ✦
-    </Text>
+    <View
+      style={{
+        width: size + 12,
+        height: size + 12,
+        borderRadius: (size + 12) / 2,
+        backgroundColor: colors.primary,
+        justifyContent: "center",
+        alignItems: "center",
+      }}
+    >
+      <Text style={{ fontSize: size - 2, color: colors.onPrimary, fontWeight: "700" }}>
+        ✦
+      </Text>
+    </View>
   );
 }
 
@@ -37,28 +56,36 @@ export default function TabsLayout() {
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 4,
+          height: 64,
+          paddingBottom: 10,
+          paddingTop: 6,
         },
         tabBarLabelStyle: {
           ...typography.caption,
           fontWeight: "500",
+          fontSize: 11,
         },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
+          title: "Map",
+          tabBarIcon: MapIcon,
+        }}
+      />
+      <Tabs.Screen
+        name="watchlist"
+        options={{
           title: "Watchlist",
           tabBarIcon: WatchlistIcon,
         }}
       />
       <Tabs.Screen
-        name="map"
+        name="forecast"
         options={{
-          title: "Map",
-          tabBarIcon: MapIcon,
+          title: "Forecast",
+          tabBarIcon: ForecastIcon,
         }}
       />
       <Tabs.Screen

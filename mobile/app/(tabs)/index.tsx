@@ -1,88 +1,145 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import {
   View,
   Text,
-  FlatList,
-  TouchableOpacity,
   TextInput,
+  TouchableOpacity,
   StyleSheet,
   StatusBar,
-  RefreshControl,
+  ScrollView,
+  Dimensions,
+  Animated,
+  PanResponder,
   ActivityIndicator,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { useStations, useFleetAlerts } from "../../lib/hooks";
+import { fetchStationFacts, fetchForecast } from "../../lib/api";
 import { colors, typography } from "../../theme/colors";
-import { spacing, radii } from "../../theme/spacing";
-import { useStations } from "../../lib/hooks";
-import { USE_MOCKS } from "../../lib/env";
-import { getOnboardingState } from "../../lib/onboarding";
-import { formatRelativeTime } from "../../lib/timezone";
+import { spacing, radii, elevation } from "../../theme/spacing";
+import StationDetailSheet from "../../components/StationDetailSheet";
 import type { StationListItem } from "../../types/station";
+import type { StationDetailResponse } from "../../types/api";
+import type { ForecastResponse } from "../../types/forecast";
 
-type SortMode = "latest" | "name" | "district";
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
-export default function WatchlistScreen() {
+const UP_REGION = {
+  latitude: 26.85,
+  longitude: 80.91,
+  latitudeDelta: 4.2,
+  longitudeDelta: 4.2,
+};
+
+let MapViewComp: any = null;
+let MarkerComp: any = null;
+let GeojsonComp: any = null;
+let PROVIDER_GOOGLE: any = null;
+
+export default function MapHomeScreen() {
   const router = useRouter();
-  const { data: stations, loading, error, refetch } = useStations();
-  const [refreshing, setRefreshing] = useState(false);
-  const [search, setSearch] = useState("");
-  const [selectedDistrict, setSelectedDistrict] = useState<string | null>(null);
-  const [sortMode, setSortMode] = useState<SortMode>("latest");
-  const [userName, setUserName] = useState("");
+  const { data: stations, loading } = useStations();
+  const { data: fleetAlertsData } = useFleetAlerts(2000);
+
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const [stationDetail, setStationDetail] = useState<StationDetailResponse | null>(null);
+  const [stationForecast, setStationForecast] = useState<ForecastResponse | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [mapReady, setMapReady] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeFilter, setActiveFilter] = useState<"all" | "safe" | "caution">("all");
+
+  const sheetY = useRef(new Animated.Value(SCREEN_H)).current;
+  const sheetVisible = useRef(false);
+
+  const showSheet = useCallback(() => {
+    sheetVisible.current = true;
+    Animated.spring(sheetY, {
+      toValue: 0,
+      useNativeDriver: true,
+      damping: 20,
+      stiffness: 200,
+    }).start();
+  }, [sheetY]);
+
+  const hideSheet = useCallback(() => {
+    Animated.spring(sheetY, {
+      toValue: SCREEN_H,
+      useNativeDriver: true,
+      damping: 20,
+      stiffness: 200,
+    }).start(() => {
+      sheetVisible.current = false;
+      setSelectedSlug(null);
+      setStationDetail(null);
+      setStationForecast(null);
+    });
+  }, [sheetY]);
 
   useEffect(() => {
-    getOnboardingState().then((s) => setUserName(s.name ?? ""));
+    try {
+      const maps = require("react-native-maps");
+      MapViewComp = maps.default;
+      MarkerComp = maps.Marker;
+      GeojsonComp = maps.Geojson;
+      PROVIDER_GOOGLE = maps.PROVIDER_GOOGLE;
+      setMapReady(true);
+    } catch {
+      setMapReady(true);
+    }
   }, []);
 
-  const onRefresh = React.useCallback(() => {
-    setRefreshing(true);
-    refetch();
-    setTimeout(() => setRefreshing(false), 800);
-  }, [refetch]);
-
-  // ── Derived data from real station list ──
-  const stationCount = stations.length;
-
-  const syncTime = useMemo(() => {
-    if (stations.length === 0) return null;
-    let latest = "";
-    for (const s of stations) {
-      if (s.last_ts && s.last_ts > latest) latest = s.last_ts;
+  // Map slug -> zone ("safe", "watch", "alert", "danger") from fleet alerts
+  const stationZoneMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (fleetAlertsData?.alerts) {
+      for (const a of fleetAlertsData.alerts) {
+        if (a.slug) {
+          map.set(a.slug, a.zone);
+        }
+      }
     }
-    if (!latest) return null;
-    const d = new Date(latest);
-    return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")} UTC`;
-  }, [stations]);
+    return map;
+  }, [fleetAlertsData]);
 
-  const syncDate = useMemo(() => {
-    if (stations.length === 0) return null;
-    let latest = "";
+  // Counts computed from real fleet/alerts response
+  const stationCounts = useMemo(() => {
+    const total = stations.length;
+    let safe = 0;
+    let caution = 0;
     for (const s of stations) {
-      if (s.last_ts && s.last_ts > latest) latest = s.last_ts;
+      const z = s.slug ? stationZoneMap.get(s.slug) : "safe";
+      if (z === "watch" || z === "alert" || z === "danger") {
+        caution++;
+      } else {
+        safe++;
+      }
     }
-    if (!latest) return null;
-    const d = new Date(latest);
-    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-  }, [stations]);
+    return { total, safe, caution };
+  }, [stations, stationZoneMap]);
 
-  const districtCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const s of stations) {
-      counts[s.district] = (counts[s.district] ?? 0) + 1;
-    }
-    return Object.entries(counts)
-      .sort((a, b) => b[1] - a[1])
-      .map(([name, count]) => ({ name, count }));
-  }, [stations]);
+  const handleStationTap = useCallback(
+    async (slug: string) => {
+      setSelectedSlug(slug);
+      setLoadingDetail(true);
+      showSheet();
+      try {
+        const [detail, fc] = await Promise.allSettled([
+          fetchStationFacts(slug),
+          fetchForecast(slug),
+        ]);
+        if (detail.status === "fulfilled") setStationDetail(detail.value);
+        if (fc.status === "fulfilled") setStationForecast(fc.value);
+      } catch {}
+      setLoadingDetail(false);
+    },
+    [showSheet]
+  );
 
-  // ── Filtering ──
-  const filtered = useMemo(() => {
+  const filteredStations = useMemo(() => {
     let list = stations;
-    if (selectedDistrict) {
-      list = list.filter((s) => s.district === selectedDistrict);
-    }
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
       list = list.filter(
         (s) =>
           s.station.toLowerCase().includes(q) ||
@@ -90,240 +147,242 @@ export default function WatchlistScreen() {
           (s.slug ?? "").toLowerCase().includes(q)
       );
     }
-    return list;
-  }, [stations, selectedDistrict, search]);
-
-  // ── Sorting ──
-  const sorted = useMemo(() => {
-    const list = [...filtered];
-    if (sortMode === "latest") {
-      list.sort((a, b) => (b.last_ts ?? "").localeCompare(a.last_ts ?? ""));
-    } else if (sortMode === "name") {
-      list.sort((a, b) => a.station.localeCompare(b.station));
-    } else if (sortMode === "district") {
-      list.sort((a, b) => a.district.localeCompare(b.district) || a.station.localeCompare(b.station));
+    if (activeFilter === "caution") {
+      list = list.filter((s) => {
+        const z = s.slug ? stationZoneMap.get(s.slug) : "safe";
+        return z === "watch" || z === "alert" || z === "danger";
+      });
+    } else if (activeFilter === "safe") {
+      list = list.filter((s) => {
+        const z = s.slug ? stationZoneMap.get(s.slug) : "safe";
+        return z !== "watch" && z !== "alert" && z !== "danger";
+      });
     }
     return list;
-  }, [filtered, sortMode]);
+  }, [stations, searchQuery, activeFilter, stationZoneMap]);
 
-  const initials = userName
-    .split(" ")
-    .map((w) => w[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
+  const stationsWithCoords = useMemo(
+    () => filteredStations.filter((s) => s.lat !== 0 && s.lon !== 0),
+    [filteredStations]
+  );
 
-  // ── Loading state ──
-  if (loading && stationCount === 0) {
-    return (
-      <View style={styles.screen}>
-        <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingText}>Loading stations...</Text>
-        </View>
-      </View>
-    );
-  }
+  const hasCoords = stations.some((s) => s.lat !== 0 || s.lon !== 0);
+  const showMap = mapReady && MapViewComp && hasCoords;
 
-  // ── Error state ──
-  if (error && stationCount === 0) {
-    return (
-      <View style={styles.screen}>
-        <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
-        <View style={styles.header}>
-          <View style={styles.headerTop}>
-            <View>
-              <Text style={styles.headerTitle}>AQUIS ML</Text>
-              <Text style={styles.headerSubtitle}>
-                <Text style={[styles.headerDot, { color: colors.negative }]}>●</Text> Offline
-              </Text>
-            </View>
-            <View style={styles.headerRight}>
-              {initials ? (
-                <View style={styles.avatar}>
-                  <Text style={styles.avatarText}>{initials}</Text>
-                </View>
-              ) : null}
-            </View>
-          </View>
-        </View>
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorTitle}>Unable to reach ML service</Text>
-          <Text style={styles.errorText}>
-            {error.body?.detail ?? error.body?.error ?? "Network error"}.
-            Check that the tunnel is running and try again.
-          </Text>
-          <TouchableOpacity
-            style={styles.retryButton}
-            onPress={() => refetch()}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.retryText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 5,
+      onPanResponderMove: (_, g) => {
+        if (sheetVisible.current && g.dy > 0) {
+          sheetY.setValue(g.dy);
+        }
+      },
+      onPanResponderRelease: (_, g) => {
+        if (g.dy > 120) {
+          hideSheet();
+        } else {
+          Animated.spring(sheetY, {
+            toValue: 0,
+            useNativeDriver: true,
+            damping: 20,
+            stiffness: 200,
+          }).start();
+        }
+      },
+    })
+  ).current;
 
   return (
     <View style={styles.screen}>
-      <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
 
-      {/* ── Header ── */}
-      <View style={styles.header}>
-        <View style={styles.headerTop}>
-          <View>
-            <Text style={styles.headerTitle}>AQUIS ML</Text>
-            <Text style={styles.headerSubtitle}>
-              <Text style={styles.headerDot}>●</Text> {stationCount} Stns Active • Live
+      {/* Map background */}
+      <View style={styles.mapContainer}>
+        {showMap ? (
+          <MapViewComp
+            style={styles.map}
+            provider={PROVIDER_GOOGLE}
+            initialRegion={UP_REGION}
+            showsUserLocation={false}
+            showsMyLocationButton={false}
+            showsCompass={false}
+            toolbarEnabled={false}
+            scrollEnabled={true}
+            zoomEnabled={true}
+            rotateEnabled={false}
+            pitchEnabled={false}
+          >
+            {/* Real District Boundary Outlines */}
+            {GeojsonComp && (
+              <GeojsonComp
+                geojson={require("../../assets/geo/up-districts.geojson")}
+                strokeColor="rgba(2, 132, 199, 0.35)"
+                strokeWidth={1.2}
+                fillColor="rgba(2, 132, 199, 0.02)"
+              />
+            )}
+
+            {stationsWithCoords.map((s) => {
+              const isSelected = selectedSlug === s.slug;
+              const zone = s.slug ? stationZoneMap.get(s.slug) : null;
+              
+              let pinColor = "#94A3B8"; // neutral gray
+              if (zone === "safe") pinColor = colors.positive;
+              else if (zone === "watch") pinColor = colors.warning;
+              else if (zone === "alert" || zone === "danger") pinColor = colors.negative;
+              else if (!zone && s.slug) pinColor = colors.positive; // default safe if missing
+
+              return (
+                <MarkerComp
+                  key={s.slug ?? `m-${s.id}`}
+                  coordinate={{ latitude: s.lat, longitude: s.lon }}
+                  onPress={() => s.slug && handleStationTap(s.slug)}
+                  onCalloutPress={() => s.slug && handleStationTap(s.slug)}
+                  tracksViewChanges={false}
+                >
+                  {isSelected ? (
+                    <View style={styles.activeMarkerContainer}>
+                      <View style={styles.activeMarkerLabel}>
+                        <Text style={styles.activeMarkerLabelText}>
+                          {s.district} • {s.station}
+                        </Text>
+                      </View>
+                      <View style={styles.activeMarkerPulseOuter}>
+                        <View style={styles.activeMarkerPulseInner}>
+                          <Text style={styles.activeMarkerDrop}>💧</Text>
+                        </View>
+                      </View>
+                    </View>
+                  ) : (
+                    <View style={[styles.inactiveMarker, { borderColor: pinColor }]}>
+                      <View style={[styles.inactiveMarkerDot, { backgroundColor: pinColor }]} />
+                    </View>
+                  )}
+                </MarkerComp>
+              );
+            })}
+          </MapViewComp>
+        ) : (
+          <View style={styles.mapFallback}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={styles.mapFallbackText}>
+              {loading ? "Loading stations..." : "Initializing map..."}
             </Text>
           </View>
-          <View style={styles.headerRight}>
-            <Text style={styles.syncText}>SYNC: {syncTime ?? "—"}</Text>
-            {initials ? (
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{initials}</Text>
-              </View>
-            ) : null}
+        )}
+      </View>
+
+      {/* Header overlay */}
+      <View style={styles.header}>
+        <View style={styles.headerLeft}>
+          <View style={styles.logoAndBrand}>
+            <View style={styles.logoBox}>
+              <Text style={styles.logoIcon}>💧</Text>
+            </View>
+            <Text style={styles.brandText}>AQUIS</Text>
+          </View>
+          <View style={styles.basinInfo}>
+            <View style={styles.basinDot} />
+            <Text style={styles.basinText}>UTTAR PRADESH • GWL</Text>
           </View>
         </View>
-      </View>
-
-      {/* ── Network summary card ── */}
-      <View style={styles.networkCard}>
-        <View style={styles.networkCardHeader}>
-          <Text style={styles.networkCardLabel}>HYDROLOGICAL TELEMETRY</Text>
-          <View style={styles.networkLiveBadge}>
-            <View style={styles.networkLiveDot} />
-            <Text style={styles.networkLiveText}>Live Ingestion</Text>
-          </View>
+        <View style={styles.headerRight}>
+          <TouchableOpacity style={styles.headerIconBtn}>
+            <Text style={styles.headerIcon}>📡</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.avatarBtn}>
+            <Text style={styles.avatarIcon}>👤</Text>
+          </TouchableOpacity>
         </View>
-        <Text style={styles.networkHeadline}>
-          {stationCount} Active DWLR
-        </Text>
-        <View style={styles.networkSyncRow}>
-          <Text style={styles.networkSyncIcon}>⟳</Text>
-          <Text style={styles.networkSyncText}>
-            Last sync: {syncDate ?? "—"}{"\n"}{syncTime ?? ""}
-          </Text>
-        </View>
-        <Text style={styles.networkCaption}>
-          Unique Station Slugs • Coverage discovered on forecast query
-        </Text>
       </View>
 
-      {/* ── District filter chips ── */}
-      <View style={styles.filterSection}>
-        <Text style={styles.filterLabel}>DISTRICTS FILTER</Text>
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={[{ name: null, count: stationCount }, ...districtCounts]}
-          keyExtractor={(item) => item.name ?? "all"}
-          contentContainerStyle={styles.chipList}
-          renderItem={({ item }) => {
-            const isActive = item.name === selectedDistrict || (item.name === null && selectedDistrict === null);
-            const label = item.name ? `${item.name} (${item.count})` : `All Districts (${item.count})`;
-            return (
-              <TouchableOpacity
-                style={[styles.chip, isActive && styles.chipActive]}
-                onPress={() => setSelectedDistrict(item.name)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.chipText, isActive && styles.chipTextActive]}>
-                  {label}
-                </Text>
-              </TouchableOpacity>
-            );
-          }}
-        />
-      </View>
-
-      {/* ── Search + Sort ── */}
-      <View style={styles.searchRow}>
-        <View style={styles.searchBox}>
-          <Text style={styles.searchIcon}>⌕</Text>
+      {/* Search bar */}
+      <View style={styles.searchContainer}>
+        <View style={styles.searchBar}>
+          <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
             style={styles.searchInput}
-            placeholder="Search station, slug or district..."
+            placeholder="Search station or district..."
             placeholderTextColor={colors.textMuted}
-            value={search}
-            onChangeText={setSearch}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
           />
+          <TouchableOpacity style={styles.searchAction}>
+            <Text style={styles.searchTargetIcon}>◎</Text>
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity
-          style={styles.sortButton}
-          onPress={() => setSortMode((prev) => prev === "latest" ? "name" : prev === "name" ? "district" : "latest")}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.sortText}>{sortMode === "latest" ? "Latest ▾" : sortMode === "name" ? "Name ▾" : "District ▾"}</Text>
-        </TouchableOpacity>
       </View>
 
-      {/* ── Station list ── */}
-      <FlatList
-        data={sorted}
-        keyExtractor={(item) => item.slug ?? `station-${item.id}`}
-        contentContainerStyle={styles.list}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        renderItem={({ item }) => (
-          <StationCard
-            station={item}
-            onPress={() => {
-              const param = USE_MOCKS ? String(item.id) : (item.slug ?? String(item.id));
-              router.push(`/station/${param}`);
-            }}
-          />
-        )}
-        ItemSeparatorComponent={() => <View style={styles.separator} />}
-        ListEmptyComponent={
-          !loading ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>No stations found</Text>
-              <Text style={styles.emptyText}>
-                {search ? "Try a different search term" : "No stations loaded"}
-              </Text>
+      {/* Filter chips */}
+      <View style={styles.chipsContainer}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsScroll}>
+          <TouchableOpacity
+            style={[styles.chip, activeFilter === "all" && styles.chipActive]}
+            onPress={() => setActiveFilter("all")}
+          >
+            <Text style={[styles.chipIcon, activeFilter === "all" && styles.chipTextActive]}>💧</Text>
+            <Text style={[styles.chipText, activeFilter === "all" && styles.chipTextActive, { fontWeight: "bold" }]}>
+              DWLR Wells ({stationCounts.total})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.chip, activeFilter === "safe" && styles.chipActiveSafeBorder]}
+            onPress={() => setActiveFilter("safe")}
+          >
+            <View style={[styles.chipDot, { backgroundColor: colors.positive }]} />
+            <Text style={styles.chipText}>Safe / Nominal</Text>
+            <View style={styles.chipCount}>
+              <Text style={styles.chipCountText}>{stationCounts.safe}</Text>
             </View>
-          ) : null
-        }
-      />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.chip, activeFilter === "caution" && styles.chipActiveCautionBorder]}
+            onPress={() => setActiveFilter("caution")}
+          >
+            <View style={[styles.chipDot, { backgroundColor: colors.warning }]} />
+            <Text style={styles.chipText}>Caution</Text>
+            <View style={styles.chipCount}>
+              <Text style={styles.chipCountText}>{stationCounts.caution}</Text>
+            </View>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+
+      {/* Station Detail Bottom Sheet */}
+      {selectedSlug && (
+        <Animated.View
+          style={[
+            styles.sheetContainer,
+            { transform: [{ translateY: sheetY }] },
+          ]}
+          {...panResponder.panHandlers}
+        >
+          {loadingDetail && !stationDetail ? (
+            <View style={styles.sheetLoading}>
+              <View style={styles.handle} />
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={styles.sheetLoadingText}>Loading station data...</Text>
+            </View>
+          ) : stationDetail ? (
+            <StationDetailSheet
+              station={stationDetail}
+              forecast={stationForecast}
+              onClose={hideSheet}
+              onMoreInfo={() => {
+                hideSheet();
+                if (selectedSlug) router.push(`/station/${selectedSlug}`);
+              }}
+            />
+          ) : (
+            <View style={styles.sheetLoading}>
+              <View style={styles.handle} />
+              <Text style={styles.sheetLoadingText}>Station data unavailable</Text>
+            </View>
+          )}
+        </Animated.View>
+      )}
     </View>
-  );
-}
-
-// ── Station card component ──
-function StationCard({
-  station,
-  onPress,
-}: {
-  station: StationListItem;
-  onPress: () => void;
-}) {
-  const timeAgo = formatRelativeTime(station.last_ts);
-
-  return (
-    <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.7}>
-      <View style={styles.cardTop}>
-        <View style={styles.cardDistrictBadge}>
-          <Text style={styles.cardDistrictText}>{station.district}</Text>
-        </View>
-        <Text style={styles.cardTimestamp}>{timeAgo}</Text>
-      </View>
-      <Text style={styles.cardName} numberOfLines={1}>
-        {station.station}
-      </Text>
-      {station.slug ? (
-        <Text style={styles.cardSlug} numberOfLines={1}>
-          slug: {station.slug}
-        </Text>
-      ) : null}
-      <View style={styles.cardBottom}>
-        <Text style={styles.cardExplore}>Explore →</Text>
-      </View>
-    </TouchableOpacity>
   );
 }
 
@@ -332,39 +391,98 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-
-  // ── Header ──
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xxl + spacing.lg,
-    paddingBottom: spacing.md,
+  mapContainer: {
+    ...StyleSheet.absoluteFillObject,
   },
-  headerTop: {
+  map: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  mapFallback: {
+    flex: 1,
+    backgroundColor: "#E8F0FE",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: spacing.md,
+  },
+  mapFallbackText: {
+    ...typography.body,
+    color: colors.textMuted,
+  },
+  header: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "flex-start",
+    alignItems: "center",
+    paddingTop: 52,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+    backgroundColor: "rgba(255,255,255,0.92)",
+    ...elevation.low,
   },
-  headerTitle: {
-    ...typography.headlineMd,
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+  },
+  logoAndBrand: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  brandText: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: colors.primary,
+    letterSpacing: 0.5,
+  },
+  logoBox: {
+    width: 32,
+    height: 32,
+    borderRadius: radii.md,
+    backgroundColor: colors.primary,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  logoIcon: {
+    fontSize: 16,
+  },
+  basinInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  basinDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.positive,
+  },
+  basinText: {
+    ...typography.labelSm,
     color: colors.textPrimary,
-  },
-  headerSubtitle: {
-    ...typography.bodySm,
-    color: colors.textMuted,
-    marginTop: spacing.xs,
-  },
-  headerDot: {
-    color: colors.positive,
+    fontWeight: "600",
+    letterSpacing: 0.04,
   },
   headerRight: {
-    alignItems: "flex-end",
+    flexDirection: "row",
+    alignItems: "center",
     gap: spacing.sm,
   },
-  syncText: {
-    ...typography.codeMono,
-    color: colors.textMuted,
+  headerIconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.surfaceContainerLow,
+    justifyContent: "center",
+    alignItems: "center",
   },
-  avatar: {
+  headerIcon: {
+    fontSize: 16,
+  },
+  avatarBtn: {
     width: 36,
     height: 36,
     borderRadius: 18,
@@ -372,279 +490,203 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  avatarText: {
-    ...typography.labelSm,
-    color: colors.onPrimary,
-    fontWeight: "700",
+  avatarIcon: {
+    fontSize: 16,
   },
-
-  // ── Loading state ──
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    gap: spacing.md,
+  searchContainer: {
+    position: "absolute",
+    top: 108,
+    left: spacing.lg,
+    right: spacing.lg,
   },
-  loadingText: {
-    ...typography.bodyMd,
-    color: colors.textMuted,
-  },
-
-  // ── Endpoint banner ──
-  endpointBanner: {
+  searchBar: {
     flexDirection: "row",
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.md,
-    backgroundColor: colors.surfaceContainerLow,
-    borderRadius: radii.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  endpointLabel: {
-    ...typography.codeMono,
-    color: colors.primary,
-    fontWeight: "600",
-  },
-  endpointValue: {
-    ...typography.codeMono,
-    color: colors.textSecondary,
-  },
-
-  // ── Network summary card ──
-  networkCard: {
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.md,
+    alignItems: "center",
     backgroundColor: colors.surface,
     borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-    gap: spacing.sm,
-  },
-  networkCardHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  networkCardLabel: {
-    ...typography.labelSm,
-    color: colors.textMuted,
-  },
-  networkLiveBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  networkLiveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.positive,
-  },
-  networkLiveText: {
-    ...typography.labelSm,
-    color: colors.positive,
-  },
-  networkHeadline: {
-    ...typography.headlineLgMobile,
-    color: colors.textPrimary,
-  },
-  networkSyncRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: spacing.xs,
-  },
-  networkSyncIcon: {
-    ...typography.bodyMd,
-    color: colors.textMuted,
-  },
-  networkSyncText: {
-    ...typography.bodySm,
-    color: colors.textSecondary,
-  },
-  networkCaption: {
-    ...typography.bodySm,
-    color: colors.textMuted,
-    marginTop: spacing.xs,
-  },
-
-  // ── Error state ──
-  errorContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: spacing.xxxl,
-    gap: spacing.md,
-  },
-  errorTitle: {
-    ...typography.headlineSm,
-    color: colors.textPrimary,
-    textAlign: "center",
-  },
-  errorText: {
-    ...typography.bodyMd,
-    color: colors.textMuted,
-    textAlign: "center",
-    lineHeight: 20,
-  },
-  retryButton: {
-    backgroundColor: colors.primary,
-    borderRadius: radii.md,
-    paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.md,
-    marginTop: spacing.sm,
-  },
-  retryText: {
-    ...typography.labelMd,
-    color: colors.onPrimary,
-    fontWeight: "600",
-  },
-
-  // ── District filter ──
-  filterSection: {
-    marginBottom: spacing.md,
-  },
-  filterLabel: {
-    ...typography.labelSm,
-    color: colors.textMuted,
-    paddingHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-  },
-  chipList: {
-    paddingHorizontal: spacing.lg,
-    gap: spacing.sm,
-  },
-  chip: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    borderRadius: radii.full,
+    gap: spacing.sm,
+    ...elevation.medium,
+  },
+  searchIcon: {
+    fontSize: 16,
+  },
+  searchInput: {
+    flex: 1,
+    ...typography.body,
+    color: colors.textPrimary,
+    padding: 0,
+  },
+  searchAction: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.surfaceContainerLow,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  searchTargetIcon: {
+    fontSize: 16,
+    color: colors.primary,
+  },
+  chipsContainer: {
+    position: "absolute",
+    top: 164,
+    left: 0,
+    right: 0,
+  },
+  chipsScroll: {
+    paddingHorizontal: spacing.lg,
+    gap: spacing.xs,
+  },
+  chip: {
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: colors.surface,
+    borderRadius: radii.full,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginRight: spacing.sm,
+    gap: spacing.xs,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: "#E2E8F0",
+    ...elevation.low,
   },
   chipActive: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
   },
-  chipText: {
-    ...typography.labelMd,
-    color: colors.textSecondary,
+  chipActiveSafeBorder: {
+    borderColor: colors.positive,
+  },
+  chipActiveCautionBorder: {
+    borderColor: colors.warning,
+  },
+  chipIcon: {
+    fontSize: 12,
+    color: colors.primary,
   },
   chipTextActive: {
     color: colors.onPrimary,
   },
-
-  // ── Search + Sort ──
-  searchRow: {
-    flexDirection: "row",
-    paddingHorizontal: spacing.lg,
-    gap: spacing.sm,
-    marginBottom: spacing.lg,
+  chipDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
-  searchBox: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: colors.surface,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.md,
-    height: 40,
-  },
-  searchIcon: {
-    fontSize: 16,
-    color: colors.textMuted,
-    marginRight: spacing.sm,
-  },
-  searchInput: {
-    flex: 1,
-    ...typography.bodyMd,
+  chipText: {
+    fontSize: 12,
+    fontWeight: "600",
     color: colors.textPrimary,
-    padding: 0,
   },
-  sortButton: {
-    paddingHorizontal: spacing.md,
-    height: 40,
-    borderRadius: radii.md,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
+  chipCount: {
+    backgroundColor: "#F1F5F9",
+    borderRadius: radii.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    marginLeft: spacing.xs,
+  },
+  chipCountText: {
+    fontSize: 10,
+    fontWeight: "bold",
+    color: colors.textSecondary,
+  },
+  activeMarkerContainer: {
+    alignItems: "center",
     justifyContent: "center",
   },
-  sortText: {
-    ...typography.labelMd,
-    color: colors.textSecondary,
-  },
-
-  // ── List ──
-  list: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xxxl,
-  },
-  separator: {
-    height: spacing.sm,
-  },
-
-  // ── Station card ──
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: radii.lg,
+  activeMarkerLabel: {
+    backgroundColor: "#0F172A",
+    borderRadius: 30,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginBottom: 4,
     borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-    gap: spacing.xs,
+    borderColor: "rgba(255,255,255,0.15)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
-  cardTop: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+  activeMarkerLabelText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "bold",
+  },
+  activeMarkerPulseOuter: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(2, 132, 199, 0.2)",
+    justifyContent: "center",
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(2, 132, 199, 0.4)",
   },
-  cardDistrictBadge: {
-    backgroundColor: colors.surfaceContainerLow,
-    borderRadius: radii.sm,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xxs,
+  activeMarkerPulseInner: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.primary,
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  cardDistrictText: {
-    ...typography.labelSm,
-    color: colors.textSecondary,
+  activeMarkerDrop: {
+    fontSize: 11,
+    color: "#FFFFFF",
   },
-  cardTimestamp: {
-    ...typography.bodySm,
-    color: colors.textMuted,
+  inactiveMarker: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 2,
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 1.5,
+    elevation: 2,
   },
-  cardName: {
-    ...typography.titleMd,
-    color: colors.textPrimary,
-    marginTop: spacing.xs,
+  inactiveMarkerDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
-  cardSlug: {
-    ...typography.bodySm,
-    color: colors.textMuted,
+  sheetContainer: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
   },
-  cardBottom: {
+  handle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.borderStrong,
+    alignSelf: "center",
     marginTop: spacing.sm,
-    alignItems: "flex-end",
+    marginBottom: spacing.md,
   },
-  cardExplore: {
-    ...typography.labelMd,
-    color: colors.primary,
-    fontWeight: "600",
-  },
-
-  // ── Empty state ──
-  emptyState: {
+  sheetLoading: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radii.xl,
+    borderTopRightRadius: radii.xl,
+    padding: spacing.xl,
     alignItems: "center",
-    paddingVertical: spacing.xxxl,
-    gap: spacing.sm,
+    gap: spacing.md,
+    ...elevation.high,
   },
-  emptyTitle: {
-    ...typography.headlineSm,
-    color: colors.textPrimary,
-  },
-  emptyText: {
-    ...typography.bodyMd,
+  sheetLoadingText: {
+    ...typography.body,
     color: colors.textMuted,
   },
 });

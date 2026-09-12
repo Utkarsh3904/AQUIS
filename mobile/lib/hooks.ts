@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   fetchStationList, fetchStationFacts, fetchForecast, fetchTrend,
   fetchStationSeries, fetchStationAlerts, fetchDistrictList, fetchDistrictDetail,
+  fetchFleetAlerts,
   ApiRequestError,
 } from "../lib/api";
 import type { StationListItem } from "../types/station";
@@ -9,6 +10,7 @@ import type { ForecastResponse } from "../types/forecast";
 import type {
   TrendResponse, StationDetailResponse, StationSeriesResponse,
   StationAlertsResponse, DistrictListResponse, DistrictDetailResponse,
+  FleetAlertsResponse,
 } from "../types/api";
 import type { ApiError } from "../types/assistant";
 
@@ -204,6 +206,23 @@ export function useTrend(stationId: number | null) {
       .catch((e: ApiRequestError) => setError(toHookError(e)))
       .finally(() => setLoading(false));
   }, [stationId]);
+
+  return { data, loading, error };
+}
+
+export function useFleetAlerts(limit?: number) {
+  const [data, setData] = useState<FleetAlertsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<HookError | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    fetchFleetAlerts(limit)
+      .then(setData)
+      .catch((e: ApiRequestError) => setError(toHookError(e)))
+      .finally(() => setLoading(false));
+  }, [limit]);
 
   return { data, loading, error };
 }

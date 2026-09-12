@@ -3,7 +3,8 @@ import { ApiRequestError } from "../api";
 
 // Keys are numeric Postgres PK ids, matching StationListItem.id
 // §10.4 + §10.7 prompt template fields
-export const mockStationFacts: Record<number, StationFacts> = {
+// Mock objects are partial — getMockStationFacts() fills in the rest.
+export const mockStationFacts: Record<number, Partial<StationFacts>> = {
   // Ramchhitoni Sahawar (UP-011) — rising
   11: {
     last: -2.841,
@@ -266,6 +267,46 @@ export const mockStationFacts: Record<number, StationFacts> = {
   },
 };
 
+const MOCK_DEFAULTS: StationFacts = {
+  slug: "unknown",
+  station: "Unknown Station",
+  district: "UNKNOWN",
+  latitude: null,
+  longitude: null,
+  level: "station",
+  last: 0,
+  last_date: "",
+  min: 0,
+  max: 0,
+  span: 0,
+  n_obs: 0,
+  outliers: 0,
+  change_7d: null,
+  change_30d: null,
+  change_60d: null,
+  change_180d: null,
+  forecast: null,
+  district_median: 0,
+  district_n_stations: 0,
+  district_context: {
+    max_level: null,
+    mean: null,
+    median: null,
+    min_level: null,
+    n_analysed: 0,
+    n_deep_180d: 0,
+    n_stations: 0,
+    most_stressed: [],
+  },
+  drivers: [],
+  rain_recent: { rain_7d: null, rain_30d: null, rain_90d: null, last_rain_date: null },
+  annual: [],
+  precautions: [],
+  fleet_recency: { latest_date: "", recent_dates: {}, stations_with_data: 0 },
+  station_names: [],
+  district_names: [],
+};
+
 export function getMockStationFacts(id: number): StationFacts {
   const facts = mockStationFacts[id];
   if (!facts) {
@@ -274,5 +315,5 @@ export function getMockStationFacts(id: number): StationFacts {
       detail: `No facts for station id ${id}`,
     });
   }
-  return facts;
+  return { ...MOCK_DEFAULTS, ...facts } as StationFacts;
 }

@@ -17,7 +17,6 @@ import { spacing, radii } from "../../theme/spacing";
 import { postAssistantChat } from "../../lib/api";
 import { useStations } from "../../lib/hooks";
 import type { AssistantResponse } from "../../types/assistant";
-import type { StationFacts } from "../../types/station";
 
 interface ChatMessage {
   id: string;

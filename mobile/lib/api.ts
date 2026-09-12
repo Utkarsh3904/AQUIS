@@ -6,7 +6,12 @@ import { getMockAssistantResponse } from "./mocks/assistant";
 import type { StationRow, StationListItem, StationFacts } from "../types/station";
 import type { ForecastResponse } from "../types/forecast";
 import type { AssistantRequest, AssistantResponse } from "../types/assistant";
-import type { PaginatedResponse, MlStationListResponse, TrendResponse } from "../types/api";
+import type {
+  PaginatedResponse, MlStationListResponse, TrendResponse,
+  StationDetailResponse, StationSeriesResponse,
+  DistrictListResponse, DistrictDetailResponse,
+  FleetRecoveryResponse, FleetAlertsResponse, StationAlertsResponse,
+} from "../types/api";
 
 const FETCH_TIMEOUT_MS = 30_000;
 
@@ -66,8 +71,8 @@ export async function fetchStationList(): Promise<StationListItem[]> {
     station: s.station,
     district: s.district,
     slug: s.slug,
-    lat: 0, // ML service doesn't provide coordinates
-    lon: 0,
+    lat: s.latitude ?? 0,
+    lon: s.longitude ?? 0,
     last_ts: s.last_ts?.replace(" ", "T"),
     external_station_id: s.slug,
   }));
@@ -76,11 +81,11 @@ export async function fetchStationList(): Promise<StationListItem[]> {
 // ─── Station facts (detail KPIs) ───────────────────────────────────────
 // Mock: GET /stations/:id (numeric PK)
 // Live: GET /stations/<slug> (ML service slug-based endpoint)
-export async function fetchStationFacts(idOrSlug: number | string): Promise<StationFacts> {
+export async function fetchStationFacts(idOrSlug: number | string): Promise<StationDetailResponse> {
   if (USE_MOCKS) {
-    return getMockStationFacts(Number(idOrSlug));
+    return getMockStationFacts(Number(idOrSlug)) as unknown as StationDetailResponse;
   }
-  return apiFetch<StationFacts>(`/stations/${idOrSlug}`);
+  return apiFetch<StationDetailResponse>(`/stations/${idOrSlug}`);
 }
 
 // ─── Forecast ───────────────────────────────────────────────────────────
@@ -145,4 +150,53 @@ export async function fetchTrend(stationId: number): Promise<TrendResponse> {
     };
   }
   return apiFetch(`/trends/${stationId}`);
+}
+
+// ─── Station series (6h GWL + drivers) ─────────────────────────────
+// GET /stations/<slug>/series
+export async function fetchStationSeries(
+  slug: string,
+  opts?: { drivers?: string[]; from?: string; to?: string; limit?: number }
+): Promise<StationSeriesResponse> {
+  const params = new URLSearchParams();
+  if (opts?.drivers?.length) params.set("drivers", opts.drivers.join(","));
+  if (opts?.from) params.set("from", opts.from);
+  if (opts?.to) params.set("to", opts.to);
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  const qs = params.toString();
+  return apiFetch<StationSeriesResponse>(`/stations/${slug}/series${qs ? `?${qs}` : ""}`);
+}
+
+// ─── Station alerts ────────────────────────────────────────────────
+// GET /stations/<slug>/alerts
+export async function fetchStationAlerts(slug: string, n?: number): Promise<StationAlertsResponse> {
+  const qs = n ? `?n=${n}` : "";
+  return apiFetch<StationAlertsResponse>(`/stations/${slug}/alerts${qs}`);
+}
+
+// ─── District list ─────────────────────────────────────────────────
+// GET /districts
+export async function fetchDistrictList(limit?: number): Promise<DistrictListResponse> {
+  const qs = limit ? `?limit=${limit}` : "";
+  return apiFetch<DistrictListResponse>(`/districts${qs}`);
+}
+
+// ─── District detail ───────────────────────────────────────────────
+// GET /districts/<name>
+export async function fetchDistrictDetail(name: string): Promise<DistrictDetailResponse> {
+  return apiFetch<DistrictDetailResponse>(`/districts/${encodeURIComponent(name)}`);
+}
+
+// ─── Fleet recovery ────────────────────────────────────────────────
+// GET /fleet/recovery
+export async function fetchFleetRecovery(limit?: number): Promise<FleetRecoveryResponse> {
+  const qs = limit ? `?limit=${limit}` : "";
+  return apiFetch<FleetRecoveryResponse>(`/fleet/recovery${qs}`);
+}
+
+// ─── Fleet alerts ──────────────────────────────────────────────────
+// GET /fleet/alerts
+export async function fetchFleetAlerts(limit?: number): Promise<FleetAlertsResponse> {
+  const qs = limit ? `?limit=${limit}` : "";
+  return apiFetch<FleetAlertsResponse>(`/fleet/alerts${qs}`);
 }

@@ -1,8 +1,15 @@
 import { useEffect, useState } from "react";
-import { fetchStationList, fetchStationFacts, fetchForecast, fetchTrend, ApiRequestError } from "../lib/api";
-import type { StationListItem, StationFacts } from "../types/station";
+import {
+  fetchStationList, fetchStationFacts, fetchForecast, fetchTrend,
+  fetchStationSeries, fetchStationAlerts, fetchDistrictList, fetchDistrictDetail,
+  ApiRequestError,
+} from "../lib/api";
+import type { StationListItem } from "../types/station";
 import type { ForecastResponse } from "../types/forecast";
-import type { TrendResponse } from "../types/api";
+import type {
+  TrendResponse, StationDetailResponse, StationSeriesResponse,
+  StationAlertsResponse, DistrictListResponse, DistrictDetailResponse,
+} from "../types/api";
 import type { ApiError } from "../types/assistant";
 
 export interface HookError {
@@ -38,7 +45,7 @@ export function useStations() {
 }
 
 export function useStationFacts(id: number | null) {
-  const [data, setData] = useState<StationFacts | null>(null);
+  const [data, setData] = useState<StationDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<HookError | null>(null);
 
@@ -55,8 +62,85 @@ export function useStationFacts(id: number | null) {
   return { data, loading, error };
 }
 
+export function useStationSeries(slug: string | null, opts?: { drivers?: string[]; limit?: number }) {
+  const [data, setData] = useState<StationSeriesResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<HookError | null>(null);
+
+  useEffect(() => {
+    if (!slug) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    fetchStationSeries(slug, opts)
+      .then(setData)
+      .catch((e: ApiRequestError) => setError(toHookError(e)))
+      .finally(() => setLoading(false));
+  }, [slug]);
+
+  return { data, loading, error };
+}
+
+export function useStationAlerts(slug: string | null, n?: number) {
+  const [data, setData] = useState<StationAlertsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<HookError | null>(null);
+
+  useEffect(() => {
+    if (!slug) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    fetchStationAlerts(slug, n)
+      .then(setData)
+      .catch((e: ApiRequestError) => setError(toHookError(e)))
+      .finally(() => setLoading(false));
+  }, [slug]);
+
+  return { data, loading, error };
+}
+
+export function useDistrictList() {
+  const [data, setData] = useState<DistrictListResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<HookError | null>(null);
+
+  useEffect(() => {
+    fetchDistrictList()
+      .then(setData)
+      .catch((e: ApiRequestError) => setError(toHookError(e)))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return { data, loading, error };
+}
+
+export function useDistrictDetail(name: string | null) {
+  const [data, setData] = useState<DistrictDetailResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<HookError | null>(null);
+
+  useEffect(() => {
+    if (!name) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    fetchDistrictDetail(name)
+      .then(setData)
+      .catch((e: ApiRequestError) => setError(toHookError(e)))
+      .finally(() => setLoading(false));
+  }, [name]);
+
+  return { data, loading, error };
+}
 export function useStationFactsBySlug(slug: string | null) {
-  const [data, setData] = useState<StationFacts | null>(null);
+  const [data, setData] = useState<StationDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<HookError | null>(null);
   const [fetchKey, setFetchKey] = useState(0);

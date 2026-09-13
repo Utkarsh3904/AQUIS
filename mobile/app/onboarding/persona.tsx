@@ -10,8 +10,10 @@ import { useRouter } from "expo-router";
 import { colors, typography } from "../../theme/colors";
 import { spacing, radii } from "../../theme/spacing";
 import { saveOnboardingPersona } from "../../lib/onboarding";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function OnboardingPersonaScreen() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
 
   const handleSelect = async (persona: "researcher" | "public") => {
@@ -26,7 +28,7 @@ export default function OnboardingPersonaScreen() {
   return (
     <View style={styles.screen}>
       <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
-      <View style={styles.container}>
+      <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
         <View style={styles.headerSection}>
           <Text style={styles.title}>How will you use AQUIS?</Text>
           <Text style={styles.subtitle}>

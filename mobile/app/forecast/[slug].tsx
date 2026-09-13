@@ -9,10 +9,11 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { colors, typography } from "../../theme/colors";
-import { spacing, radii } from "../../theme/spacing";
+import { spacing, radii, BOTTOM_NAV_CLEARANCE } from "../../theme/spacing";
 import { useForecast } from "../../lib/hooks";
 import { EmptyState } from "../../components/EmptyState";
 import { formatIstDateTime, formatIstShort } from "../../lib/timezone";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const CONFIDENCE_COLORS: Record<string, string> = {
   HIGH: colors.positive,
@@ -27,9 +28,12 @@ const DIRECTION_COLORS: Record<string, string> = {
   "expected rise": colors.positive,
   "expected decline": colors.negative,
   stable: colors.textSecondary,
+  rising: colors.positive,
+  declining: colors.negative,
 };
 
 export default function ForecastScreen() {
+  const insets = useSafeAreaInsets();
   const { slug } = useLocalSearchParams<{ slug: string }>();
   const router = useRouter();
   const { data: forecast, loading, error, refetch } = useForecast(slug ?? null);
@@ -57,7 +61,7 @@ export default function ForecastScreen() {
     return (
       <View style={styles.screen}>
         <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
           <TouchableOpacity onPress={() => router.back()}>
             <Text style={styles.backBtn}>← Back</Text>
           </TouchableOpacity>
@@ -86,7 +90,7 @@ export default function ForecastScreen() {
     <View style={styles.screen}>
       <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
 
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
         <TouchableOpacity onPress={() => router.back()}>
           <Text style={styles.backBtn}>← Back</Text>
         </TouchableOpacity>
@@ -291,9 +295,9 @@ export default function ForecastScreen() {
                   styles.summaryStatValue,
                   {
                     color:
-                      dirLabel === "expected rise"
+                      dirLabel === "expected rise" || dirLabel === "rising"
                         ? colors.positive
-                        : dirLabel === "expected decline"
+                        : dirLabel === "expected decline" || dirLabel === "declining"
                         ? colors.negative
                         : colors.textPrimary,
                   },
@@ -452,7 +456,7 @@ const styles = StyleSheet.create({
   headerSubtitle: { ...typography.caption, color: colors.textSecondary },
   content: {
     paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xxxl,
+    paddingBottom: BOTTOM_NAV_CLEARANCE,
     gap: spacing.md,
   },
   // ── Headline ──

@@ -12,45 +12,169 @@ import {
   PanResponder,
   ActivityIndicator,
 } from "react-native";
+import { WebView } from "react-native-webview";
 import { useRouter } from "expo-router";
 import { useStations, useFleetAlerts } from "../../lib/hooks";
 import { fetchStationFacts, fetchForecast } from "../../lib/api";
 import { colors, typography } from "../../theme/colors";
 import { spacing, radii, elevation } from "../../theme/spacing";
 import StationDetailSheet from "../../components/StationDetailSheet";
-import type { StationListItem } from "../../types/station";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { StationDetailResponse } from "../../types/api";
 import type { ForecastResponse } from "../../types/forecast";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
-const UP_REGION = {
-  latitude: 26.85,
-  longitude: 80.91,
-  latitudeDelta: 4.2,
-  longitudeDelta: 4.2,
-};
+const LEAFLET_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>AQUIS Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body, #map { width: 100%; height: 100%; }
+  .leaflet-control-attribution { font-size: 9px !important; }
+  .station-marker {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #fff; border: 2.5px solid #94A3B8;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .station-marker .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .error-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: #E8F0FE; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; z-index: 9999;
+    font-family: -apple-system, sans-serif;
+  }
+  .error-overlay.hidden { display: none; }
+  .error-overlay p { color: #64748B; font-size: 14px; margin-top: 12px; }
+  .error-overlay .icon { font-size: 48px; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="error-overlay" class="error-overlay">
+  <div class="icon">🗺️</div>
+  <p>Map tiles failed to load — check connection</p>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+(function() {
+  var map, mcg, geojsonLayer = null, tilesLoaded = false;
 
-let MapViewComp: any = null;
-let MarkerComp: any = null;
-let GeojsonComp: any = null;
-let PROVIDER_GOOGLE: any = null;
+  function postMsg(obj) {
+    try { window.ReactNativeWebView.postMessage(JSON.stringify(obj)); } catch(e) {}
+  }
+
+  function zoneColor(zone) {
+    if (zone === 'safe') return '#16A34A';
+    if (zone === 'watch') return '#F59E0B';
+    if (zone === 'alert' || zone === 'danger') return '#DC2626';
+    return '#94A3B8';
+  }
+
+  function makeIcon(color) {
+    return L.divIcon({
+      className: '',
+      html: '<div class="station-marker"><div class="dot" style="background:' + color + '"></div></div>',
+      iconSize: [14, 14],
+      iconAnchor: [7, 7]
+    });
+  }
+
+  function init() {
+    map = L.map('map', { center: [26.8467, 80.9462], zoom: 6.5, zoomControl: false, attributionControl: true });
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>',
+      maxZoom: 19
+    }).on('load', function() {
+      tilesLoaded = true;
+      document.getElementById('error-overlay').classList.add('hidden');
+      postMsg({ type: 'mapReady' });
+    }).on('error', function() {
+      if (!tilesLoaded) document.getElementById('error-overlay').classList.remove('hidden');
+    }).addTo(map);
+
+    mcg = L.markerClusterGroup({ maxClusterRadius: 40, spiderfyOnMaxZoom: true, showCoverageOnHover: false, disableClusteringAtZoom: 15 });
+    map.addLayer(mcg);
+
+    setTimeout(function() { if (!tilesLoaded) { document.getElementById('error-overlay').classList.remove('hidden'); postMsg({ type: 'mapReady' }); } }, 8000);
+  }
+
+  window.setStations = function(stationsJson, zoneMapJson) {
+    if (!map || !mcg) return;
+    var stations = typeof stationsJson === 'string' ? JSON.parse(stationsJson) : stationsJson;
+    var zoneMap = typeof zoneMapJson === 'string' ? JSON.parse(zoneMapJson) : (zoneMapJson || {});
+    if (!Array.isArray(stations) || stations.length === 0) return;
+    mcg.clearLayers();
+    var added = 0;
+    for (var i = 0; i < stations.length; i++) {
+      var s = stations[i];
+      var lat = s.lat || s.latitude;
+      var lon = s.lon || s.longitude;
+      if (!lat || !lon || (lat === 0 && lon === 0)) continue;
+      var slug = s.slug || '';
+      var color = zoneColor(zoneMap[slug] || '');
+      var m = L.marker([lat, lon], { icon: makeIcon(color) });
+      (function(sl, st, di) {
+        m.on('click', function() { postMsg({ type: 'markerClick', slug: sl, station: st, district: di }); });
+      })(slug, s.station || '', s.district || '');
+      mcg.addLayer(m);
+      added++;
+    }
+    postMsg({ type: 'stationsRendered', count: added });
+  };
+
+  window.setGeojson = function(gj) {
+    if (!map) return;
+    var geojson = typeof gj === 'string' ? JSON.parse(gj) : gj;
+    if (!geojson) return;
+    if (geojsonLayer) { map.removeLayer(geojsonLayer); geojsonLayer = null; }
+    geojsonLayer = L.geoJSON(geojson, { style: { color: 'rgba(2,132,199,0.35)', weight: 1.2, fillColor: 'rgba(2,132,199,0.02)', fillOpacity: 0.02 } }).addTo(map);
+  };
+
+  init();
+})();
+</script>
+</body>
+</html>`;
 
 export default function MapHomeScreen() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { data: stations, loading } = useStations();
-  const { data: fleetAlertsData } = useFleetAlerts(2000);
+  const { data: stations, loading: stationsLoading, error: stationsError } = useStations();
+  const { data: fleetAlertsData, loading: fleetLoading, error: fleetError } = useFleetAlerts(2000);
 
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [stationDetail, setStationDetail] = useState<StationDetailResponse | null>(null);
   const [stationForecast, setStationForecast] = useState<ForecastResponse | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
-  const [mapReady, setMapReady] = useState(false);
+  const [mapWebViewReady, setMapWebViewReady] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<"all" | "safe" | "caution">("all");
 
+  const webviewRef = useRef<WebView>(null);
   const sheetY = useRef(new Animated.Value(SCREEN_H)).current;
   const sheetVisible = useRef(false);
+
+  useEffect(() => {
+    console.log("[MapHome] STATE — stations:", stations.length, "loading:", stationsLoading, "error:", stationsError ? JSON.stringify(stationsError) : "none");
+    console.log("[MapHome] STATE — fleetAlerts:", fleetAlertsData?.count ?? "null", "loading:", fleetLoading, "error:", fleetError ? JSON.stringify(fleetError) : "none");
+    console.log("[MapHome] STATE — mapWebViewReady:", mapWebViewReady);
+    if (stations.length > 0) {
+      const withCoords = stations.filter((s) => s.lat !== 0 && s.lon !== 0);
+      console.log("[MapHome] STATE — stations with coords:", withCoords.length, "of", stations.length);
+      console.log("[MapHome] STATE — first station:", JSON.stringify(stations[0]));
+    }
+  }, [stations, stationsLoading, stationsError, fleetAlertsData, fleetLoading, fleetError, mapWebViewReady]);
 
   const showSheet = useCallback(() => {
     sheetVisible.current = true;
@@ -76,64 +200,53 @@ export default function MapHomeScreen() {
     });
   }, [sheetY]);
 
-  useEffect(() => {
-    try {
-      const maps = require("react-native-maps");
-      MapViewComp = maps.default;
-      MarkerComp = maps.Marker;
-      GeojsonComp = maps.Geojson;
-      PROVIDER_GOOGLE = maps.PROVIDER_GOOGLE;
-      setMapReady(true);
-    } catch {
-      setMapReady(true);
-    }
-  }, []);
-
-  // Map slug -> zone ("safe", "watch", "alert", "danger") from fleet alerts
   const stationZoneMap = useMemo(() => {
     const map = new Map<string, string>();
     if (fleetAlertsData?.alerts) {
       for (const a of fleetAlertsData.alerts) {
-        if (a.slug) {
-          map.set(a.slug, a.zone);
-        }
+        if (a.slug) map.set(a.slug, a.zone);
       }
     }
     return map;
   }, [fleetAlertsData]);
 
-  // Counts computed from real fleet/alerts response
   const stationCounts = useMemo(() => {
     const total = stations.length;
     let safe = 0;
     let caution = 0;
     for (const s of stations) {
       const z = s.slug ? stationZoneMap.get(s.slug) : "safe";
-      if (z === "watch" || z === "alert" || z === "danger") {
-        caution++;
-      } else {
-        safe++;
-      }
+      if (z === "watch" || z === "alert" || z === "danger") caution++;
+      else safe++;
     }
     return { total, safe, caution };
   }, [stations, stationZoneMap]);
 
   const handleStationTap = useCallback(
     async (slug: string) => {
+      console.log("[MapHome] handleStationTap — slug:", JSON.stringify(slug), "type:", typeof slug);
+      const matchedStation = stations.find((s) => s.slug === slug);
+      console.log("[MapHome] handleStationTap — matchedStation:", matchedStation ? JSON.stringify({ slug: matchedStation.slug, station: matchedStation.station, district: matchedStation.district }) : "NOT FOUND");
+
       setSelectedSlug(slug);
       setLoadingDetail(true);
       showSheet();
       try {
+        console.log("[MapHome] fetchStationFacts calling:", `/stations/${slug}`);
         const [detail, fc] = await Promise.allSettled([
           fetchStationFacts(slug),
           fetchForecast(slug),
         ]);
+        console.log("[MapHome] fetchStationFacts result:", detail.status, detail.status === "fulfilled" ? JSON.stringify({ slug: detail.value.slug, station: detail.value.station }).substring(0, 100) : JSON.stringify(detail.reason));
+        console.log("[MapHome] fetchForecast result:", fc.status, fc.status === "fulfilled" ? "ok" : JSON.stringify(fc.reason));
         if (detail.status === "fulfilled") setStationDetail(detail.value);
         if (fc.status === "fulfilled") setStationForecast(fc.value);
-      } catch {}
+      } catch (e: any) {
+        console.error("[MapHome] handleStationTap catch:", e?.message || e);
+      }
       setLoadingDetail(false);
     },
-    [showSheet]
+    [showSheet, stations]
   );
 
   const filteredStations = useMemo(() => {
@@ -166,8 +279,79 @@ export default function MapHomeScreen() {
     [filteredStations]
   );
 
-  const hasCoords = stations.some((s) => s.lat !== 0 || s.lon !== 0);
-  const showMap = mapReady && MapViewComp && hasCoords;
+  const mapFallbackMessage = useMemo(() => {
+    if (stationsError) return `Station fetch failed (${stationsError.status}): ${stationsError.body?.error || "check console"}`;
+    if (fleetError) return `Fleet alerts failed (${fleetError.status}): ${fleetError.body?.error || "check console"}`;
+    if (stationsLoading) return "Loading stations from API...";
+    if (stations.length === 0) return "No stations returned from API.";
+    return "Initializing map...";
+  }, [stationsError, fleetError, stationsLoading, stations.length]);
+
+  const zoneMapObj = useMemo(() => {
+    const obj: Record<string, string> = {};
+    stationZoneMap.forEach((v, k) => { obj[k] = v; });
+    return obj;
+  }, [stationZoneMap]);
+
+  const geojsonRef = useRef<any>(null);
+  if (!geojsonRef.current) {
+    try {
+      geojsonRef.current = require("../../assets/geo/up-districts.json");
+    } catch (e) {
+      console.error("[MapHome] geojson import failed:", e);
+    }
+  }
+
+  const injectMapData = useCallback(() => {
+    if (!webviewRef.current) return;
+    if (stationsWithCoords.length === 0) {
+      console.log("[MapHome] SKIP inject — no stations with coords");
+      return;
+    }
+    const stationPayload = stationsWithCoords.map((s) => ({
+      slug: s.slug,
+      station: s.station,
+      district: s.district,
+      lat: s.lat,
+      lon: s.lon,
+    }));
+    console.log("[MapHome] INJECT —", stationPayload.length, "stations, first 3 slugs:", stationPayload.slice(0, 3).map((s) => s.slug));
+    const js = `window.setStations(${JSON.stringify(stationPayload)}, ${JSON.stringify(zoneMapObj)}); true;`;
+    console.log("[MapHome] INJECT stations:", stationPayload.length);
+    webviewRef.current.injectJavaScript(js);
+
+    if (geojsonRef.current) {
+      const geoJs = `window.setGeojson(${JSON.stringify(geojsonRef.current)}); true;`;
+      console.log("[MapHome] INJECT geojson");
+      webviewRef.current.injectJavaScript(geoJs);
+    }
+  }, [stationsWithCoords, zoneMapObj]);
+
+  useEffect(() => {
+    if (mapWebViewReady) {
+      injectMapData();
+    }
+  }, [mapWebViewReady, injectMapData]);
+
+  const handleWebViewMessage = useCallback((event: any) => {
+    try {
+      const raw = event.nativeEvent.data;
+      console.log("[MapHome] WebView message raw:", typeof raw, raw?.substring?.(0, 200));
+      const data = JSON.parse(raw);
+      console.log("[MapHome] WebView message parsed:", JSON.stringify(data));
+      if (data.type === "mapReady") {
+        console.log("[MapHome] WebView mapReady received");
+        setMapWebViewReady(true);
+      } else if (data.type === "markerClick" && data.slug) {
+        console.log("[MapHome] markerClick — slug:", JSON.stringify(data.slug), "station:", data.station, "district:", data.district);
+        handleStationTap(data.slug);
+      } else if (data.type === "stationsRendered") {
+        console.log("[MapHome] stationsRendered:", data.count);
+      }
+    } catch (e) {
+      console.error("[MapHome] WebView message parse error:", e);
+    }
+  }, [handleStationTap]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -199,82 +383,29 @@ export default function MapHomeScreen() {
 
       {/* Map background */}
       <View style={styles.mapContainer}>
-        {showMap ? (
-          <MapViewComp
-            style={styles.map}
-            provider={PROVIDER_GOOGLE}
-            initialRegion={UP_REGION}
-            showsUserLocation={false}
-            showsMyLocationButton={false}
-            showsCompass={false}
-            toolbarEnabled={false}
-            scrollEnabled={true}
-            zoomEnabled={true}
-            rotateEnabled={false}
-            pitchEnabled={false}
-          >
-            {/* Real District Boundary Outlines */}
-            {GeojsonComp && (
-              <GeojsonComp
-                geojson={require("../../assets/geo/up-districts.geojson")}
-                strokeColor="rgba(2, 132, 199, 0.35)"
-                strokeWidth={1.2}
-                fillColor="rgba(2, 132, 199, 0.02)"
-              />
-            )}
-
-            {stationsWithCoords.map((s) => {
-              const isSelected = selectedSlug === s.slug;
-              const zone = s.slug ? stationZoneMap.get(s.slug) : null;
-              
-              let pinColor = "#94A3B8"; // neutral gray
-              if (zone === "safe") pinColor = colors.positive;
-              else if (zone === "watch") pinColor = colors.warning;
-              else if (zone === "alert" || zone === "danger") pinColor = colors.negative;
-              else if (!zone && s.slug) pinColor = colors.positive; // default safe if missing
-
-              return (
-                <MarkerComp
-                  key={s.slug ?? `m-${s.id}`}
-                  coordinate={{ latitude: s.lat, longitude: s.lon }}
-                  onPress={() => s.slug && handleStationTap(s.slug)}
-                  onCalloutPress={() => s.slug && handleStationTap(s.slug)}
-                  tracksViewChanges={false}
-                >
-                  {isSelected ? (
-                    <View style={styles.activeMarkerContainer}>
-                      <View style={styles.activeMarkerLabel}>
-                        <Text style={styles.activeMarkerLabelText}>
-                          {s.district} • {s.station}
-                        </Text>
-                      </View>
-                      <View style={styles.activeMarkerPulseOuter}>
-                        <View style={styles.activeMarkerPulseInner}>
-                          <Text style={styles.activeMarkerDrop}>💧</Text>
-                        </View>
-                      </View>
-                    </View>
-                  ) : (
-                    <View style={[styles.inactiveMarker, { borderColor: pinColor }]}>
-                      <View style={[styles.inactiveMarkerDot, { backgroundColor: pinColor }]} />
-                    </View>
-                  )}
-                </MarkerComp>
-              );
-            })}
-          </MapViewComp>
-        ) : (
-          <View style={styles.mapFallback}>
-            <ActivityIndicator size="large" color={colors.primary} />
-            <Text style={styles.mapFallbackText}>
-              {loading ? "Loading stations..." : "Initializing map..."}
-            </Text>
-          </View>
-        )}
+        <WebView
+          ref={webviewRef}
+          source={{ html: LEAFLET_HTML, baseUrl: "" }}
+          style={styles.map}
+          originWhitelist={["*"]}
+          javaScriptEnabled={true}
+          domStorageEnabled={true}
+          onLoadEnd={() => console.log("[MapHome] WebView onLoadEnd")}
+          onError={(e) => console.error("[MapHome] WebView onError:", e.nativeEvent)}
+          onHttpError={(e) => console.error("[MapHome] WebView onHttpError:", e.nativeEvent.statusCode)}
+          onMessage={handleWebViewMessage}
+          startInLoadingState={true}
+          renderLoading={() => (
+            <View style={styles.mapFallback}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={styles.mapFallbackText}>{mapFallbackMessage}</Text>
+            </View>
+          )}
+        />
       </View>
 
       {/* Header overlay */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
         <View style={styles.headerLeft}>
           <View style={styles.logoAndBrand}>
             <View style={styles.logoBox}>
@@ -395,10 +526,10 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
   },
   map: {
-    ...StyleSheet.absoluteFillObject,
+    flex: 1,
   },
   mapFallback: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: "#E8F0FE",
     justifyContent: "center",
     alignItems: "center",
@@ -591,75 +722,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "bold",
     color: colors.textSecondary,
-  },
-  activeMarkerContainer: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  activeMarkerLabel: {
-    backgroundColor: "#0F172A",
-    borderRadius: 30,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    marginBottom: 4,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  activeMarkerLabelText: {
-    color: "#FFFFFF",
-    fontSize: 10,
-    fontWeight: "bold",
-  },
-  activeMarkerPulseOuter: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "rgba(2, 132, 199, 0.2)",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "rgba(2, 132, 199, 0.4)",
-  },
-  activeMarkerPulseInner: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: colors.primary,
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.4,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  activeMarkerDrop: {
-    fontSize: 11,
-    color: "#FFFFFF",
-  },
-  inactiveMarker: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 2,
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.15,
-    shadowRadius: 1.5,
-    elevation: 2,
-  },
-  inactiveMarkerDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
   },
   sheetContainer: {
     position: "absolute",

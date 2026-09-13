@@ -35,9 +35,19 @@ export function useStations() {
   useEffect(() => {
     setLoading(true);
     setError(null);
+    console.log("[useStations] fetching /stations?limit=2000 ...");
     fetchStationList()
-      .then(setData)
-      .catch((e: ApiRequestError) => setError(toHookError(e)))
+      .then((rows) => {
+        console.log("[useStations] OK — got", rows.length, "stations");
+        if (rows.length > 0) {
+          console.log("[useStations] first station:", JSON.stringify(rows[0]));
+        }
+        setData(rows);
+      })
+      .catch((e: ApiRequestError) => {
+        console.error("[useStations] FAILED:", e.status, JSON.stringify(e.body), e.message);
+        setError(toHookError(e));
+      })
       .finally(() => setLoading(false));
   }, [fetchKey]);
 
@@ -218,9 +228,17 @@ export function useFleetAlerts(limit?: number) {
   useEffect(() => {
     setLoading(true);
     setError(null);
+    const url = `/fleet/alerts${limit ? `?limit=${limit}` : ""}`;
+    console.log("[useFleetAlerts] fetching", url, "...");
     fetchFleetAlerts(limit)
-      .then(setData)
-      .catch((e: ApiRequestError) => setError(toHookError(e)))
+      .then((res) => {
+        console.log("[useFleetAlerts] OK — count:", res.count, "alerts:", res.alerts?.length);
+        setData(res);
+      })
+      .catch((e: ApiRequestError) => {
+        console.error("[useFleetAlerts] FAILED:", e.status, JSON.stringify(e.body), e.message);
+        setError(toHookError(e));
+      })
       .finally(() => setLoading(false));
   }, [limit]);
 

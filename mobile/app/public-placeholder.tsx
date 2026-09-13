@@ -4,8 +4,10 @@ import { useRouter } from "expo-router";
 import { colors, typography } from "../theme/colors";
 import { spacing, radii } from "../theme/spacing";
 import { saveOnboardingPersona } from "../lib/onboarding";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function PublicPlaceholderScreen() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
 
   const handleSwitch = async () => {
@@ -16,7 +18,7 @@ export default function PublicPlaceholderScreen() {
   return (
     <View style={styles.screen}>
       <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
-      <View style={styles.container}>
+      <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
         <View style={styles.iconContainer}>
           <Text style={styles.icon}>🚧</Text>
         </View>

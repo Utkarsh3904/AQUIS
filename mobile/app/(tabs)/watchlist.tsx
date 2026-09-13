@@ -4,7 +4,6 @@ import {
   Text,
   FlatList,
   TouchableOpacity,
-  TextInput,
   StyleSheet,
   StatusBar,
   RefreshControl,
@@ -14,14 +13,16 @@ import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useStations } from "../../lib/hooks";
 import { colors, typography } from "../../theme/colors";
-import { spacing, radii } from "../../theme/spacing";
+import { spacing, radii, BOTTOM_NAV_CLEARANCE } from "../../theme/spacing";
 import { EmptyState } from "../../components/EmptyState";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { StationListItem } from "../../types/station";
 
 const STORAGE_KEY_NAME = "aquis_user_name";
 const STORAGE_KEY_PERSONA = "aquis_persona";
 
 export default function WatchlistScreen() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { data: stations, loading, error, refetch } = useStations();
   const [refreshing, setRefreshing] = useState(false);
@@ -131,7 +132,7 @@ export default function WatchlistScreen() {
 
   const listHeader = (
     <View>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
         <View style={styles.headerLeft}>
           <Text style={styles.greeting}>Hello, {userName}</Text>
           <Text style={styles.headerTitle}>{stationCount} Active DWLR</Text>
@@ -142,16 +143,14 @@ export default function WatchlistScreen() {
       </View>
 
       <View style={styles.searchRow}>
-        <View style={styles.searchBar}>
+        <TouchableOpacity
+          style={styles.searchBar}
+          activeOpacity={0.7}
+          onPress={() => router.push("/station-search")}
+        >
           <Text style={styles.searchIcon}>🔍</Text>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search stations..."
-            placeholderTextColor={colors.textMuted}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-        </View>
+          <Text style={styles.searchPlaceholder}>Search stations, districts, or slugs...</Text>
+        </TouchableOpacity>
         <TouchableOpacity
           style={styles.sortBtn}
           onPress={() => setSortMode(sortMode === "latest" ? "name" : sortMode === "name" ? "district" : "latest")}
@@ -211,7 +210,7 @@ const styles = StyleSheet.create({
   errorText: { ...typography.bodyMd, color: colors.textMuted, textAlign: "center", lineHeight: 20 },
   retryButton: { backgroundColor: colors.primary, borderRadius: radii.md, paddingHorizontal: spacing.xl, paddingVertical: spacing.md, marginTop: spacing.sm },
   retryText: { ...typography.labelMd, color: colors.onPrimary, fontWeight: "600" },
-  listContent: { paddingBottom: spacing.xxxl },
+  listContent: { paddingBottom: BOTTOM_NAV_CLEARANCE },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: spacing.lg, paddingTop: spacing.xxl + spacing.lg, paddingBottom: spacing.md },
   headerLeft: { gap: spacing.xs },
   greeting: { ...typography.body, color: colors.textMuted },
@@ -221,7 +220,7 @@ const styles = StyleSheet.create({
   searchRow: { flexDirection: "row", paddingHorizontal: spacing.lg, gap: spacing.sm, marginBottom: spacing.md },
   searchBar: { flex: 1, flexDirection: "row", alignItems: "center", backgroundColor: colors.surface, borderRadius: radii.md, paddingHorizontal: spacing.md, gap: spacing.sm, borderWidth: 1, borderColor: colors.border },
   searchIcon: { fontSize: 14 },
-  searchInput: { flex: 1, ...typography.body, color: colors.textPrimary, paddingVertical: spacing.sm },
+  searchPlaceholder: { ...typography.body, color: colors.textMuted, flex: 1 },
   sortBtn: { width: 40, height: 40, borderRadius: radii.md, backgroundColor: colors.surface, justifyContent: "center", alignItems: "center", borderWidth: 1, borderColor: colors.border },
   sortBtnText: { ...typography.labelMd, color: colors.textSecondary },
   chipRow: { paddingHorizontal: spacing.lg, paddingBottom: spacing.md, gap: spacing.sm },

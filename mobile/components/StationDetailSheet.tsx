@@ -155,7 +155,7 @@ export default function StationDetailSheet({ station, forecast, onClose, onMoreI
     if (!f) return "safe";
     if (!f.plausible) return "watch";
     if (f.high_uncertainty) return "watch";
-    if (f.direction === "expected decline" && Math.abs(f.change_30d_pred) > 0.5) return "alert";
+    if ((f.direction === "expected decline" || f.direction === "declining") && Math.abs(f.change_30d_pred) > 0.5) return "alert";
     return "safe";
   }, [station]);
 

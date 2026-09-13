@@ -29,7 +29,7 @@ export interface EndpointProduction {
 }
 
 export interface Direction {
-  label: string; // "expected rise" | "expected decline" | "stable"
+  label: string; // "rising" | "declining" | "stable" (forecast API) or "expected rise" | "expected decline" (facts.forecast)
   change_q50_30d: number;
   agreement_with_production: boolean | null;
   sign_accuracy_30d: number | null;

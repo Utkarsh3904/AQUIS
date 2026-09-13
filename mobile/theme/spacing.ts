@@ -1,6 +1,8 @@
 // DESIGN.md spacing system — 4px rhythm base
 // space-xs=4, space-sm=8, space-md=12, space-lg=16, space-xl=24, space-2xl=32, space-3xl=48
 
+export const BOTTOM_NAV_CLEARANCE = 100; // BottomNav pill height (~60px) + wrapper paddingBottom (20px) + buffer (20px)
+
 export const spacing = {
   xxs: 2,
   xs: 4,

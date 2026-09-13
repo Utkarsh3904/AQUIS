@@ -13,8 +13,10 @@ import { useRouter } from "expo-router";
 import { colors, typography } from "../../theme/colors";
 import { spacing, radii } from "../../theme/spacing";
 import { saveOnboardingName } from "../../lib/onboarding";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function OnboardingNameScreen() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const [name, setName] = useState("");
 
@@ -31,7 +33,7 @@ export default function OnboardingNameScreen() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
-      <View style={styles.container}>
+      <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
         <View style={styles.headerSection}>
           <Text style={styles.greeting}>Welcome to</Text>
           <Text style={styles.logo}>AQUIS</Text>

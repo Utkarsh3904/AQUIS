@@ -11,9 +11,10 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { colors, typography } from "../../theme/colors";
-import { spacing, radii, elevation } from "../../theme/spacing";
+import { spacing, radii, elevation, BOTTOM_NAV_CLEARANCE } from "../../theme/spacing";
 import { useStationFactsBySlug, useForecast, useStationSeries, useStations } from "../../lib/hooks";
 import { EmptyState } from "../../components/EmptyState";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 
@@ -33,15 +34,22 @@ function ForecastChart({
   anchor,
   trajectory,
   forecast,
+  forecastError,
 }: {
   anchor: number;
   trajectory: any[];
   forecast: any;
+  forecastError?: boolean;
 }) {
   if (!trajectory || trajectory.length < 2) {
     return (
       <View style={styles.chartPlaceholder}>
-        <Text style={styles.chartPlaceholderText}>Loading forecast chart...</Text>
+        <Text style={styles.chartPlaceholderTitle}>Forecast not available right now</Text>
+        <Text style={styles.chartPlaceholderText}>
+          {forecastError
+            ? "The prediction model hasn't generated data for this station yet."
+            : "Trajectory data not yet generated for this station."}
+        </Text>
       </View>
     );
   }
@@ -121,13 +129,14 @@ function ForecastChart({
 }
 
 export default function StationDetailScreen() {
+  const insets = useSafeAreaInsets();
   const { slug } = useLocalSearchParams<{ slug: string }>();
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<"live" | "forecast">("live");
 
   const { data: stations } = useStations();
   const { data: facts, loading, error, refetch } = useStationFactsBySlug(slug ?? null);
-  const { data: forecast } = useForecast(slug ?? null);
+  const { data: forecast, error: fcError } = useForecast(slug ?? null);
   const { data: series } = useStationSeries(slug ?? null, { limit: 200 });
 
   const currentStation = useMemo(
@@ -152,7 +161,7 @@ export default function StationDetailScreen() {
     return (
       <View style={styles.screen}>
         <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
-        <View style={styles.topBar}>
+        <View style={[styles.topBar, { paddingTop: insets.top + spacing.sm }]}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
             <Text style={styles.backArrow}>←</Text>
           </TouchableOpacity>
@@ -169,13 +178,14 @@ export default function StationDetailScreen() {
   const level = facts?.last ?? 0;
   const anchorGwl = forecast?.anchor_gwl ?? level;
   const anchorTime = forecast?.anchor_time ?? "";
-  const day30Pred = facts?.forecast?.day30_pred ?? 0;
+  const day30Pred = facts?.forecast?.day30_pred ?? null;
   const change30d = facts?.forecast?.change_30d_pred ?? 0;
   const direction = facts?.forecast?.direction ?? "stable";
-  const isRising = direction === "expected rise";
+  const isRising = direction === "expected rise" || direction === "rising";
   const bandHalf = facts?.forecast?.band_half ?? 0;
   const q05 = facts?.forecast?.q05_level ?? (level - bandHalf);
   const q95 = facts?.forecast?.q95_level ?? (level + bandHalf);
+  const hasForecast = day30Pred != null;
   const signAccuracy = forecast?.direction?.sign_accuracy_30d;
   const agreement = forecast?.direction?.agreement_with_production;
   const scarcity = facts?.precautions?.[0]?.level === "watch" ? "Watch" : "Safe";
@@ -194,13 +204,13 @@ export default function StationDetailScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Search bar */}
-        <View style={styles.searchBar}>
+        {/* Search bar — navigates to shared browse screen */}
+        <TouchableOpacity style={styles.searchBar} activeOpacity={0.7} onPress={() => router.push("/station-search")}>
           <Text style={styles.searchIcon}>🔍</Text>
           <Text style={styles.searchText} numberOfLines={1}>
             {facts?.station ?? "Station"} ({facts?.district ?? ""})
           </Text>
-        </View>
+        </TouchableOpacity>
 
         {/* Filter chips */}
         <View style={styles.chipsRow}>
@@ -259,7 +269,7 @@ export default function StationDetailScreen() {
             <View style={styles.projectedCard}>
               <Text style={styles.projectedLabel}>PROJECTED AQUIFER LEVEL</Text>
               <View style={styles.projectedRow}>
-                <Text style={styles.projectedValue}>{day30Pred.toFixed(2)}</Text>
+                <Text style={styles.projectedValue}>{day30Pred?.toFixed(2) ?? level.toFixed(2)}</Text>
                 <Text style={styles.projectedUnit}>mbgl</Text>
                 <View style={[styles.changeBadge, { backgroundColor: isRising ? colors.positiveBg : colors.negativeBg }]}>
                   <Text style={[styles.changeBadgeText, { color: isRising ? colors.positive : colors.negative }]}>
@@ -322,23 +332,29 @@ export default function StationDetailScreen() {
                 anchor={anchorGwl}
                 trajectory={trajectory}
                 forecast={forecast}
+                forecastError={!!fcError}
               />
 
               {/* Day 30 summary */}
-              <View style={styles.day30Card}>
-                <View style={styles.day30Header}>
-                  <View style={[styles.day30Dot, { backgroundColor: colors.positive }]} />
-                  <Text style={styles.day30Label}>Day 30:</Text>
-                  <Text style={styles.day30Value}>{day30Pred.toFixed(2)}m</Text>
+              {hasForecast && (
+                <View style={styles.day30Card}>
+                  <View style={styles.day30Header}>
+                    <View style={[styles.day30Dot, { backgroundColor: colors.positive }]} />
+                    <Text style={styles.day30Label}>Day 30:</Text>
+                    <Text style={styles.day30Value}>{day30Pred!.toFixed(2)}m</Text>
+                  </View>
+                  <Text style={styles.day30Envelope}>
+                    90% Envelope: q05: {q05.toFixed(2)}m | q95: {q95.toFixed(2)}m
+                  </Text>
                 </View>
-                <Text style={styles.day30Envelope}>
-                  90% Envelope: q05: {q05.toFixed(2)}m | q95: {q95.toFixed(2)}m
-                </Text>
-              </View>
+              )}
             </View>
 
-            {/* Get more info per driver */}
-            <TouchableOpacity style={styles.driverBtn} activeOpacity={0.7}>
+            <TouchableOpacity
+              style={styles.driverBtn}
+              activeOpacity={0.7}
+              onPress={() => slug && router.push(`/drivers/${slug}`)}
+            >
               <Text style={styles.driverBtnText}>GET MORE INFORMATION PER DRIVER</Text>
             </TouchableOpacity>
 
@@ -405,17 +421,20 @@ export default function StationDetailScreen() {
               anchor={anchorGwl}
               trajectory={trajectory}
               forecast={forecast}
+              forecastError={!!fcError}
             />
-            <View style={styles.day30Card}>
-              <View style={styles.day30Header}>
-                <View style={[styles.day30Dot, { backgroundColor: colors.positive }]} />
-                <Text style={styles.day30Label}>Day 30:</Text>
-                <Text style={styles.day30Value}>{day30Pred.toFixed(2)}m</Text>
+            {hasForecast && (
+              <View style={styles.day30Card}>
+                <View style={styles.day30Header}>
+                  <View style={[styles.day30Dot, { backgroundColor: colors.positive }]} />
+                  <Text style={styles.day30Label}>Day 30:</Text>
+                  <Text style={styles.day30Value}>{day30Pred!.toFixed(2)}m</Text>
+                </View>
+                <Text style={styles.day30Envelope}>
+                  90% Envelope: q05: {q05.toFixed(2)}m | q95: {q95.toFixed(2)}m
+                </Text>
               </View>
-              <Text style={styles.day30Envelope}>
-                90% Envelope: q05: {q05.toFixed(2)}m | q95: {q95.toFixed(2)}m
-              </Text>
-            </View>
+            )}
           </View>
         )}
       </ScrollView>
@@ -426,7 +445,7 @@ export default function StationDetailScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   scroll: { flex: 1 },
-  scrollContent: { padding: spacing.lg, paddingBottom: spacing.xxxl, gap: spacing.md },
+  scrollContent: { padding: spacing.lg, paddingBottom: BOTTOM_NAV_CLEARANCE, gap: spacing.md },
 
   topBar: {
     paddingHorizontal: spacing.lg,
@@ -581,8 +600,9 @@ const styles = StyleSheet.create({
   chartXLabels: { flexDirection: "row", justifyContent: "space-between", marginLeft: 55, marginTop: spacing.xs },
   chartXLabel: { ...typography.codeMono, color: colors.textMuted, fontSize: 9 },
   chartXLabelBold: { color: colors.primary, fontWeight: "700" },
-  chartPlaceholder: { height: 160, justifyContent: "center", alignItems: "center", backgroundColor: colors.surfaceContainerLow, borderRadius: radii.md },
-  chartPlaceholderText: { ...typography.bodySm, color: colors.textMuted },
+  chartPlaceholder: { height: 160, justifyContent: "center", alignItems: "center", backgroundColor: colors.surfaceContainerLow, borderRadius: radii.md, gap: spacing.xs },
+  chartPlaceholderTitle: { ...typography.body, color: colors.textSecondary, fontWeight: "600" },
+  chartPlaceholderText: { ...typography.bodySm, color: colors.textMuted, textAlign: "center", paddingHorizontal: spacing.lg },
 
   day30Card: {
     backgroundColor: colors.surfaceContainerLow,

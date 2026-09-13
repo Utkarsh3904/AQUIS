@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>AQUIS Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body, #map { width: 100%; height: 100%; }
+  .leaflet-control-attribution { font-size: 9px !important; }
+  .station-marker {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #fff; border: 2.5px solid #94A3B8;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .station-marker .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+  }
+  .error-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: #E8F0FE; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; z-index: 9999;
+    font-family: -apple-system, sans-serif;
+  }
+  .error-overlay.hidden { display: none; }
+  .error-overlay p { color: #64748B; font-size: 14px; margin-top: 12px; }
+  .error-overlay .icon { font-size: 48px; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="error-overlay" class="error-overlay">
+  <div class="icon">🗺️</div>
+  <p>Map tiles failed to load — check connection</p>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+(function() {
+  var map;
+  var markerClusterGroup;
+  var geojsonLayer = null;
+  var markersBySlug = {};
+  var tilesLoaded = false;
+
+  function init() {
+    map = L.map('map', {
+      center: [26.8467, 80.9462],
+      zoom: 6.5,
+      zoomControl: false,
+      attributionControl: true
+    });
+
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19
+    }).on('load', function() {
+      tilesLoaded = true;
+      document.getElementById('error-overlay').classList.add('hidden');
+      postMsg({ type: 'mapReady' });
+    }).on('error', function() {
+      if (!tilesLoaded) {
+        document.getElementById('error-overlay').classList.remove('hidden');
+      }
+    }).addTo(map);
+
+    markerClusterGroup = L.markerClusterGroup({
+      maxClusterRadius: 40,
+      spiderfyOnMaxZoom: true,
+      showCoverageOnHover: false,
+      disableClusteringAtZoom: 15
+    });
+    map.addLayer(markerClusterGroup);
+
+    if (!tilesLoaded) {
+      setTimeout(function() {
+        if (!tilesLoaded) {
+          document.getElementById('error-overlay').classList.remove('hidden');
+          postMsg({ type: 'mapReady' });
+        }
+      }, 5000);
+    }
+  }
+
+  function postMsg(obj) {
+    try {
+      window.ReactNativeWebView.postMessage(JSON.stringify(obj));
+    } catch(e) {}
+  }
+
+  function makeIcon(color) {
+    return L.divIcon({
+      className: '',
+      html: '<div class="station-marker"><div class="dot" style="background:' + color + '"></div></div>',
+      iconSize: [14, 14],
+      iconAnchor: [7, 7]
+    });
+  }
+
+  function zoneColor(zone) {
+    if (zone === 'safe') return '#16A34A';
+    if (zone === 'watch') return '#F59E0B';
+    if (zone === 'alert' || zone === 'danger') return '#DC2626';
+    return '#94A3B8';
+  }
+
+  window.setStations = function(stationsJson, zoneMapJson) {
+    if (!map || !markerClusterGroup) return;
+    var stations = typeof stationsJson === 'string' ? JSON.parse(stationsJson) : stationsJson;
+    var zoneMap = typeof zoneMapJson === 'string' ? JSON.parse(zoneMapJson) : (zoneMapJson || {});
+    if (!Array.isArray(stations) || stations.length === 0) return;
+
+    markerClusterGroup.clearLayers();
+    markersBySlug = {};
+
+    var added = 0;
+    for (var i = 0; i < stations.length; i++) {
+      var s = stations[i];
+      var lat = s.lat || s.latitude;
+      var lon = s.lon || s.longitude;
+      if (!lat || !lon || (lat === 0 && lon === 0)) continue;
+
+      var slug = s.slug || '';
+      var zone = zoneMap[slug] || '';
+      var color = zoneColor(zone);
+
+      var marker = L.marker([lat, lon], { icon: makeIcon(color) });
+      (function(slugVal, nameVal, districtVal) {
+        marker.on('click', function() {
+          postMsg({ type: 'markerClick', slug: slugVal, station: nameVal, district: districtVal });
+        });
+      })(slug, s.station || '', s.district || '');
+
+      markerClusterGroup.addLayer(marker);
+      if (slug) markersBySlug[slug] = marker;
+      added++;
+    }
+
+    postMsg({ type: 'stationsRendered', count: added });
+  };
+
+  window.setGeojson = function(geojsonObj) {
+    if (!map) return;
+    var geojson = typeof geojsonObj === 'string' ? JSON.parse(geojsonObj) : geojsonObj;
+    if (!geojson) return;
+
+    if (geojsonLayer) {
+      map.removeLayer(geojsonLayer);
+      geojsonLayer = null;
+    }
+
+    geojsonLayer = L.geoJSON(geojson, {
+      style: {
+        color: 'rgba(2, 132, 199, 0.35)',
+        weight: 1.2,
+        fillColor: 'rgba(2, 132, 199, 0.02)',
+        fillOpacity: 0.02
+      }
+    }).addTo(map);
+  };
+
+  window.fitBounds = function() {
+    if (!map || !markerClusterGroup) return;
+    var bounds = markerClusterGroup.getBounds();
+    if (bounds.isValid()) {
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 10 });
+    }
+  };
+
+  init();
+})();
+</script>
+</body>
+</html>

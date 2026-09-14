@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   StatusBar,
-  ScrollView,
   Dimensions,
   Animated,
   PanResponder,
@@ -14,10 +13,11 @@ import {
 } from "react-native";
 import { WebView } from "react-native-webview";
 import { useRouter } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useStations, useFleetAlerts } from "../../lib/hooks";
 import { fetchStationFacts, fetchForecast } from "../../lib/api";
 import { colors, typography } from "../../theme/colors";
-import { spacing, radii, elevation } from "../../theme/spacing";
+import { spacing, radii, elevation, BOTTOM_NAV_CLEARANCE } from "../../theme/spacing";
 import StationDetailSheet from "../../components/StationDetailSheet";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { StationDetailResponse } from "../../types/api";
@@ -159,22 +159,17 @@ export default function MapHomeScreen() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [mapWebViewReady, setMapWebViewReady] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeFilter, setActiveFilter] = useState<"all" | "safe" | "caution">("all");
+  const [userName, setUserName] = useState("R");
 
   const webviewRef = useRef<WebView>(null);
   const sheetY = useRef(new Animated.Value(SCREEN_H)).current;
   const sheetVisible = useRef(false);
 
   useEffect(() => {
-    console.log("[MapHome] STATE — stations:", stations.length, "loading:", stationsLoading, "error:", stationsError ? JSON.stringify(stationsError) : "none");
-    console.log("[MapHome] STATE — fleetAlerts:", fleetAlertsData?.count ?? "null", "loading:", fleetLoading, "error:", fleetError ? JSON.stringify(fleetError) : "none");
-    console.log("[MapHome] STATE — mapWebViewReady:", mapWebViewReady);
-    if (stations.length > 0) {
-      const withCoords = stations.filter((s) => s.lat !== 0 && s.lon !== 0);
-      console.log("[MapHome] STATE — stations with coords:", withCoords.length, "of", stations.length);
-      console.log("[MapHome] STATE — first station:", JSON.stringify(stations[0]));
-    }
-  }, [stations, stationsLoading, stationsError, fleetAlertsData, fleetLoading, fleetError, mapWebViewReady]);
+    AsyncStorage.getItem("aquis_user_name").then((n) => {
+      if (n && n.trim()) setUserName(n.trim().charAt(0).toUpperCase());
+    });
+  }, []);
 
   const showSheet = useCallback(() => {
     sheetVisible.current = true;
@@ -210,45 +205,6 @@ export default function MapHomeScreen() {
     return map;
   }, [fleetAlertsData]);
 
-  const stationCounts = useMemo(() => {
-    const total = stations.length;
-    let safe = 0;
-    let caution = 0;
-    for (const s of stations) {
-      const z = s.slug ? stationZoneMap.get(s.slug) : "safe";
-      if (z === "watch" || z === "alert" || z === "danger") caution++;
-      else safe++;
-    }
-    return { total, safe, caution };
-  }, [stations, stationZoneMap]);
-
-  const handleStationTap = useCallback(
-    async (slug: string) => {
-      console.log("[MapHome] handleStationTap — slug:", JSON.stringify(slug), "type:", typeof slug);
-      const matchedStation = stations.find((s) => s.slug === slug);
-      console.log("[MapHome] handleStationTap — matchedStation:", matchedStation ? JSON.stringify({ slug: matchedStation.slug, station: matchedStation.station, district: matchedStation.district }) : "NOT FOUND");
-
-      setSelectedSlug(slug);
-      setLoadingDetail(true);
-      showSheet();
-      try {
-        console.log("[MapHome] fetchStationFacts calling:", `/stations/${slug}`);
-        const [detail, fc] = await Promise.allSettled([
-          fetchStationFacts(slug),
-          fetchForecast(slug),
-        ]);
-        console.log("[MapHome] fetchStationFacts result:", detail.status, detail.status === "fulfilled" ? JSON.stringify({ slug: detail.value.slug, station: detail.value.station }).substring(0, 100) : JSON.stringify(detail.reason));
-        console.log("[MapHome] fetchForecast result:", fc.status, fc.status === "fulfilled" ? "ok" : JSON.stringify(fc.reason));
-        if (detail.status === "fulfilled") setStationDetail(detail.value);
-        if (fc.status === "fulfilled") setStationForecast(fc.value);
-      } catch (e: any) {
-        console.error("[MapHome] handleStationTap catch:", e?.message || e);
-      }
-      setLoadingDetail(false);
-    },
-    [showSheet, stations]
-  );
-
   const filteredStations = useMemo(() => {
     let list = stations;
     if (searchQuery) {
@@ -260,19 +216,29 @@ export default function MapHomeScreen() {
           (s.slug ?? "").toLowerCase().includes(q)
       );
     }
-    if (activeFilter === "caution") {
-      list = list.filter((s) => {
-        const z = s.slug ? stationZoneMap.get(s.slug) : "safe";
-        return z === "watch" || z === "alert" || z === "danger";
-      });
-    } else if (activeFilter === "safe") {
-      list = list.filter((s) => {
-        const z = s.slug ? stationZoneMap.get(s.slug) : "safe";
-        return z !== "watch" && z !== "alert" && z !== "danger";
-      });
-    }
     return list;
-  }, [stations, searchQuery, activeFilter, stationZoneMap]);
+  }, [stations, searchQuery]);
+
+  const handleStationTap = useCallback(
+    async (slug: string) => {
+      const matchedStation = stations.find((s) => s.slug === slug);
+
+      setSelectedSlug(slug);
+      setLoadingDetail(true);
+      showSheet();
+      try {
+        const [detail, fc] = await Promise.allSettled([
+          fetchStationFacts(slug),
+          fetchForecast(slug),
+        ]);
+        if (detail.status === "fulfilled") setStationDetail(detail.value);
+        if (fc.status === "fulfilled") setStationForecast(fc.value);
+      } catch (e: any) {
+      }
+      setLoadingDetail(false);
+    },
+    [showSheet, stations]
+  );
 
   const stationsWithCoords = useMemo(
     () => filteredStations.filter((s) => s.lat !== 0 && s.lon !== 0),
@@ -305,7 +271,6 @@ export default function MapHomeScreen() {
   const injectMapData = useCallback(() => {
     if (!webviewRef.current) return;
     if (stationsWithCoords.length === 0) {
-      console.log("[MapHome] SKIP inject — no stations with coords");
       return;
     }
     const stationPayload = stationsWithCoords.map((s) => ({
@@ -315,14 +280,11 @@ export default function MapHomeScreen() {
       lat: s.lat,
       lon: s.lon,
     }));
-    console.log("[MapHome] INJECT —", stationPayload.length, "stations, first 3 slugs:", stationPayload.slice(0, 3).map((s) => s.slug));
     const js = `window.setStations(${JSON.stringify(stationPayload)}, ${JSON.stringify(zoneMapObj)}); true;`;
-    console.log("[MapHome] INJECT stations:", stationPayload.length);
     webviewRef.current.injectJavaScript(js);
 
     if (geojsonRef.current) {
       const geoJs = `window.setGeojson(${JSON.stringify(geojsonRef.current)}); true;`;
-      console.log("[MapHome] INJECT geojson");
       webviewRef.current.injectJavaScript(geoJs);
     }
   }, [stationsWithCoords, zoneMapObj]);
@@ -336,20 +298,13 @@ export default function MapHomeScreen() {
   const handleWebViewMessage = useCallback((event: any) => {
     try {
       const raw = event.nativeEvent.data;
-      console.log("[MapHome] WebView message raw:", typeof raw, raw?.substring?.(0, 200));
       const data = JSON.parse(raw);
-      console.log("[MapHome] WebView message parsed:", JSON.stringify(data));
       if (data.type === "mapReady") {
-        console.log("[MapHome] WebView mapReady received");
         setMapWebViewReady(true);
       } else if (data.type === "markerClick" && data.slug) {
-        console.log("[MapHome] markerClick — slug:", JSON.stringify(data.slug), "station:", data.station, "district:", data.district);
         handleStationTap(data.slug);
-      } else if (data.type === "stationsRendered") {
-        console.log("[MapHome] stationsRendered:", data.count);
       }
     } catch (e) {
-      console.error("[MapHome] WebView message parse error:", e);
     }
   }, [handleStationTap]);
 
@@ -390,7 +345,7 @@ export default function MapHomeScreen() {
           originWhitelist={["*"]}
           javaScriptEnabled={true}
           domStorageEnabled={true}
-          onLoadEnd={() => console.log("[MapHome] WebView onLoadEnd")}
+          onLoadEnd={() => {}}
           onError={(e) => console.error("[MapHome] WebView onError:", e.nativeEvent)}
           onHttpError={(e) => console.error("[MapHome] WebView onHttpError:", e.nativeEvent.statusCode)}
           onMessage={handleWebViewMessage}
@@ -419,11 +374,8 @@ export default function MapHomeScreen() {
           </View>
         </View>
         <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.headerIconBtn}>
-            <Text style={styles.headerIcon}>📡</Text>
-          </TouchableOpacity>
           <TouchableOpacity style={styles.avatarBtn}>
-            <Text style={styles.avatarIcon}>👤</Text>
+            <Text style={styles.avatarIcon}>{userName}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -443,41 +395,6 @@ export default function MapHomeScreen() {
             <Text style={styles.searchTargetIcon}>◎</Text>
           </TouchableOpacity>
         </View>
-      </View>
-
-      {/* Filter chips */}
-      <View style={styles.chipsContainer}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsScroll}>
-          <TouchableOpacity
-            style={[styles.chip, activeFilter === "all" && styles.chipActive]}
-            onPress={() => setActiveFilter("all")}
-          >
-            <Text style={[styles.chipIcon, activeFilter === "all" && styles.chipTextActive]}>💧</Text>
-            <Text style={[styles.chipText, activeFilter === "all" && styles.chipTextActive, { fontWeight: "bold" }]}>
-              DWLR Wells ({stationCounts.total})
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.chip, activeFilter === "safe" && styles.chipActiveSafeBorder]}
-            onPress={() => setActiveFilter("safe")}
-          >
-            <View style={[styles.chipDot, { backgroundColor: colors.positive }]} />
-            <Text style={styles.chipText}>Safe / Nominal</Text>
-            <View style={styles.chipCount}>
-              <Text style={styles.chipCountText}>{stationCounts.safe}</Text>
-            </View>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.chip, activeFilter === "caution" && styles.chipActiveCautionBorder]}
-            onPress={() => setActiveFilter("caution")}
-          >
-            <View style={[styles.chipDot, { backgroundColor: colors.warning }]} />
-            <Text style={styles.chipText}>Caution</Text>
-            <View style={styles.chipCount}>
-              <Text style={styles.chipCountText}>{stationCounts.caution}</Text>
-            </View>
-          </TouchableOpacity>
-        </ScrollView>
       </View>
 
       {/* Station Detail Bottom Sheet */}
@@ -602,17 +519,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing.sm,
   },
-  headerIconBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.surfaceContainerLow,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  headerIcon: {
-    fontSize: 16,
-  },
   avatarBtn: {
     width: 36,
     height: 36,
@@ -622,7 +528,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   avatarIcon: {
-    fontSize: 16,
+    fontSize: 14,
+    fontWeight: "bold",
+    color: colors.onPrimary,
   },
   searchContainer: {
     position: "absolute",
@@ -661,73 +569,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.primary,
   },
-  chipsContainer: {
-    position: "absolute",
-    top: 164,
-    left: 0,
-    right: 0,
-  },
-  chipsScroll: {
-    paddingHorizontal: spacing.lg,
-    gap: spacing.xs,
-  },
-  chip: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: colors.surface,
-    borderRadius: radii.full,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    marginRight: spacing.sm,
-    gap: spacing.xs,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    ...elevation.low,
-  },
-  chipActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  chipActiveSafeBorder: {
-    borderColor: colors.positive,
-  },
-  chipActiveCautionBorder: {
-    borderColor: colors.warning,
-  },
-  chipIcon: {
-    fontSize: 12,
-    color: colors.primary,
-  },
-  chipTextActive: {
-    color: colors.onPrimary,
-  },
-  chipDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  chipText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: colors.textPrimary,
-  },
-  chipCount: {
-    backgroundColor: "#F1F5F9",
-    borderRadius: radii.full,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    marginLeft: spacing.xs,
-  },
-  chipCountText: {
-    fontSize: 10,
-    fontWeight: "bold",
-    color: colors.textSecondary,
-  },
   sheetContainer: {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
+    paddingBottom: BOTTOM_NAV_CLEARANCE,
   },
   handle: {
     width: 40,

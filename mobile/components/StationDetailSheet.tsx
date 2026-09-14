@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -13,30 +13,13 @@ import { useStationSeries } from "../lib/hooks";
 import type { StationDetailResponse } from "../types/api";
 import type { ForecastResponse } from "../types/forecast";
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
+const { height: SCREEN_H } = Dimensions.get("window");
 
 interface Props {
   station: StationDetailResponse;
   forecast: ForecastResponse | null;
   onClose: () => void;
   onMoreInfo: () => void;
-}
-
-// Helper to format date string to "DD MMM, HH:MM"
-function formatDateString(dateStr: string | null | undefined): string {
-  if (!dateStr) return "06 Sep, 18:00";
-  try {
-    const parts = dateStr.split(" ")[0].split("-");
-    if (parts.length < 3) return dateStr;
-    const day = parseInt(parts[2], 10);
-    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const monthIdx = parseInt(parts[1], 10) - 1;
-    const month = monthNames[monthIdx] || "Sep";
-    const time = dateStr.includes(" ") ? " " + dateStr.split(" ")[1].substring(0, 5) : ", 18:00";
-    return `${day < 10 ? "0" + day : day} ${month}${time}`;
-  } catch {
-    return dateStr;
-  }
 }
 
 function ZoneBadge({ zone }: { zone: string }) {
@@ -66,75 +49,118 @@ function ZoneBadge({ zone }: { zone: string }) {
 }
 
 // MiniChart using real telemetry series points from GET /stations/<slug>/series
+// Renders last 7 days of actual GWL observations as a continuous connected line
 function MiniChart({ slug }: { slug: string | null }) {
-  const { data: seriesData, loading } = useStationSeries(slug, { limit: 30 });
+  const now = new Date();
+  const from = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+  const to = now.toISOString().split("T")[0];
+  const { data: seriesData, loading } = useStationSeries(slug, { from, to, limit: 50 });
+  const [containerWidth, setContainerWidth] = useState(0);
+  const CHART_H = 80;
 
   const points = useMemo(() => {
     if (!seriesData?.points || seriesData.points.length === 0) return [];
-    const recent = seriesData.points.slice(-7);
-    const gwls = recent.map((p) => p.gwl ?? 0);
+    const valid = seriesData.points
+      .filter((p) => p.gwl != null)
+      .sort((a, b) => a.time.localeCompare(b.time));
+    if (valid.length === 0) return [];
+    const gwls = valid.map((p) => p.gwl!);
     const min = Math.min(...gwls);
     const max = Math.max(...gwls);
     const range = max - min || 1;
-    return recent.map((p) => {
-      const val = p.gwl ?? 0;
-      return (val - min) / range;
-    });
+    return valid.map((p, i) => ({
+      value: (p.gwl! - min) / range,
+      time: p.time,
+      x: (i / Math.max(valid.length - 1, 1)) * 100,
+      y: (1 - (p.gwl! - min) / range) * CHART_H,
+    }));
   }, [seriesData]);
 
+  const segments = useMemo(() => {
+    if (points.length < 2 || containerWidth === 0) return [];
+    return points.slice(1).map((pt, i) => {
+      const prev = points[i];
+      const x1 = (prev.x / 100) * containerWidth;
+      const y1 = prev.y;
+      const x2 = (pt.x / 100) * containerWidth;
+      const y2 = pt.y;
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const length = Math.sqrt(dx * dx + dy * dy);
+      const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+      return {
+        left: x1,
+        top: y1,
+        length,
+        angle,
+        isLast: i === points.length - 2,
+      };
+    });
+  }, [points, containerWidth]);
+
+  const dayLabels = useMemo(() => {
+    if (points.length <= 1) return [""];
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const labels: string[] = [];
+    const step = Math.max(1, Math.floor(points.length / 6));
+    for (let i = 0; i < points.length; i += step) {
+      const d = new Date(points[i].time);
+      labels.push(days[d.getDay()]);
+    }
+    if (labels.length < 7) {
+      while (labels.length < 7) labels.push("");
+    }
+    return labels.slice(0, 7);
+  }, [points]);
+
   if (loading) {
-    return (
-      <View style={styles.chartPlaceholder}>
-        <Text style={styles.chartPlaceholderText}>Loading real telemetry...</Text>
-      </View>
-    );
+    return null;
   }
 
   if (points.length === 0) {
-    return (
-      <View style={styles.chartPlaceholder}>
-        <Text style={styles.chartPlaceholderText}>No historical series data available</Text>
-      </View>
-    );
+    return null;
   }
 
-  const dayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
   return (
+    <View style={styles.chartSection}>
+      <Text style={styles.chartTitle}>
+        HISTORICAL 7-DAY CURVE ({points.length} pts) {points[0]?.time?.split("T")[0] ?? ""}
+      </Text>
     <View style={styles.chartContainer}>
-      <View style={styles.chartArea}>
+      <View
+        style={styles.chartArea}
+        onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}
+      >
         <View style={styles.dottedLine} />
-        <View style={styles.columnsContainer}>
-          {points.map((val, idx) => {
-            const pct = val * 0.55 + 0.25;
-            const isLast = idx === points.length - 1;
-            return (
-              <View
-                key={idx}
-                style={[
-                  styles.chartColumn,
-                  {
-                    height: `${pct * 100}%`,
-                    borderTopWidth: 2,
-                    borderTopColor: colors.primary,
-                  },
-                ]}
-              >
-                {isLast && (
-                  <View style={styles.highlightDotOuter}>
-                    <View style={styles.highlightDotInner} />
-                  </View>
-                )}
+        {/* Continuous connected line */}
+        {segments.map((seg, idx) => (
+          <View
+            key={idx}
+            style={{
+              position: "absolute",
+              left: seg.left,
+              top: seg.top,
+              width: seg.length,
+              height: 2.5,
+              backgroundColor: colors.primary,
+              borderRadius: 1.25,
+              transformOrigin: "0 50%",
+              transform: [{ rotate: `${seg.angle}deg` }],
+            }}
+          >
+            {seg.isLast && (
+              <View style={styles.highlightDotOuter}>
+                <View style={styles.highlightDotInner} />
               </View>
-            );
-          })}
-        </View>
+            )}
+          </View>
+        ))}
       </View>
 
       <View style={styles.chartLabels}>
         {dayLabels.map((d, i) => (
           <Text
-            key={d}
+            key={i}
             style={[
               styles.chartDayLabel,
               i === dayLabels.length - 1 && styles.chartDayLabelActive,
@@ -144,6 +170,7 @@ function MiniChart({ slug }: { slug: string | null }) {
           </Text>
         ))}
       </View>
+    </View>
     </View>
   );
 }
@@ -163,7 +190,7 @@ export default function StationDetailSheet({ station, forecast, onClose, onMoreI
   const lastDate = station.last_date;
   const median = station.district_context?.median;
   const change30d = station.forecast?.change_30d_pred ?? 0;
-  const day30Pred = station.forecast?.day30_pred ?? null;
+  const day30Pred = forecast?.trajectory_30d?.level ?? station.forecast?.day30_pred ?? null;
   const bandHalf = station.forecast?.band_half ?? 0;
   const q05 = station.forecast?.q05_level;
   const q95 = station.forecast?.q95_level;
@@ -199,7 +226,7 @@ export default function StationDetailSheet({ station, forecast, onClose, onMoreI
           <ZoneBadge zone={zone} />
         </View>
 
-        <Text style={styles.stationIdLine}>
+        <Text style={styles.stationIdLine} numberOfLines={1} ellipsizeMode="tail">
           {station.district?.toUpperCase() ?? "DISTRICT"} • {station.station?.toUpperCase() ?? "STATION"}
         </Text>
 
@@ -257,12 +284,7 @@ export default function StationDetailSheet({ station, forecast, onClose, onMoreI
           </View>
         )}
 
-        <View style={styles.chartSection}>
-          <Text style={styles.chartTitle}>
-            HISTORICAL 7-DAY CURVE ({Math.abs(change30d).toFixed(2)}M AVG DEPTH) {formatDateString(lastDate)}
-          </Text>
-          <MiniChart slug={station.slug} />
-        </View>
+        <MiniChart slug={station.slug} />
 
         <TouchableOpacity style={styles.ctaButton} activeOpacity={0.7} onPress={onMoreInfo}>
           <Text style={styles.ctaText}>Get more station information</Text>
@@ -473,21 +495,6 @@ const styles = StyleSheet.create({
     borderStyle: "dashed",
     borderWidth: 1,
     borderColor: "rgba(0,0,0,0.1)",
-  },
-  columnsContainer: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    top: 0,
-    flexDirection: "row",
-    alignItems: "flex-end",
-    justifyContent: "space-between",
-  },
-  chartColumn: {
-    flex: 1,
-    backgroundColor: "rgba(2, 132, 199, 0.06)",
-    position: "relative",
   },
   highlightDotOuter: {
     position: "absolute",

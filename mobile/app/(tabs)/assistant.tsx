@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from "react";
+import React, { useState, useRef, useMemo, useCallback } from "react";
 import {
   View,
   Text,
@@ -10,13 +10,14 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Dimensions,
   ActivityIndicator,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { useFocusEffect } from "@react-navigation/native";
 import { colors, typography } from "../../theme/colors";
 import { spacing, radii, elevation, BOTTOM_NAV_CLEARANCE } from "../../theme/spacing";
 import { postAssistantChat } from "../../lib/api";
+import { consumePendingSlug } from "../../lib/pendingSlug";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   useStations,
@@ -25,8 +26,7 @@ import {
   useStationSeries,
 } from "../../lib/hooks";
 import type { AssistantResponse } from "../../types/assistant";
-
-const { width: SCREEN_W } = Dimensions.get("window");
+import type { StationListItem } from "../../types/station";
 
 interface ChatMessage {
   id: string;
@@ -146,7 +146,7 @@ function StationContextCard({
       </View>
 
       <View style={s.contextNameRow}>
-        <Text style={s.contextStationName}>{facts.station}</Text>
+        <Text style={s.contextStationName} numberOfLines={1} ellipsizeMode="tail">{facts.station}</Text>
         <Text style={s.contextSubtitle}>DWLR Station</Text>
       </View>
 
@@ -445,9 +445,43 @@ export default function AssistantScreen() {
   const [loading, setLoading] = useState(false);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const flatListRef = useRef<FlatList>(null);
+  const [selectedDistrict, setSelectedDistrict] = useState<string | null>(null);
+  const flatListRef = useRef<FlatList<ChatMessage>>(null);
 
-  const { data: stations } = useStations();
+  const { data: allStations, loading: stationsLoading } = useStations();
+
+  useFocusEffect(
+    useCallback(() => {
+      const pending = consumePendingSlug();
+      if (pending) {
+        setSelectedSlug(pending);
+        setMessages([]);
+      }
+    }, [])
+  );
+
+  const districts = useMemo(() => {
+    const set = new Set(allStations.map((s) => s.district).filter(Boolean));
+    return Array.from(set).sort();
+  }, [allStations]);
+
+  const filteredStations = useMemo(() => {
+    let list = allStations.filter((s) => s.slug);
+    if (selectedDistrict) {
+      list = list.filter((s) => s.district === selectedDistrict);
+    }
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(
+        (s) =>
+          s.station.toLowerCase().includes(q) ||
+          s.district.toLowerCase().includes(q) ||
+          (s.slug ?? "").toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [allStations, searchQuery, selectedDistrict]);
+
   const { data: facts } = useStationFactsBySlug(selectedSlug);
   const { data: forecast } = useForecast(selectedSlug);
   const { data: series } = useStationSeries(selectedSlug, { limit: 2000 });
@@ -456,17 +490,6 @@ export default function AssistantScreen() {
     () => (selectedSlug ? extractStationCode(selectedSlug) : ""),
     [selectedSlug]
   );
-
-  const filteredStations = useMemo(() => {
-    if (!searchQuery.trim()) return stations.filter((s) => s.slug);
-    const q = searchQuery.toLowerCase();
-    return stations.filter(
-      (s) =>
-        s.slug &&
-        (s.station.toLowerCase().includes(q) ||
-          s.district.toLowerCase().includes(q))
-    );
-  }, [stations, searchQuery]);
 
   const sendMessage = async (text?: string) => {
     const question = (text || input).trim();
@@ -524,43 +547,72 @@ export default function AssistantScreen() {
           backgroundColor={colors.background}
         />
         <Header />
-        <View style={s.pickerContainer}>
-          <View style={s.pickerSearchBar}>
-            <Text style={s.pickerSearchIcon}>🔍</Text>
-            <TextInput
-              style={s.pickerSearchInput}
-              placeholder="Search station or district..."
-              placeholderTextColor={colors.textMuted}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
-          </View>
-          <ScrollView
-            contentContainerStyle={s.pickerList}
-            showsVerticalScrollIndicator={false}
-          >
-            {filteredStations.map((st) => (
+        <FlatList
+          data={filteredStations}
+          keyExtractor={(item) => item.slug ?? `station-${item.id}`}
+          ListHeaderComponent={
+            <>
+              <View style={s.searchRow}>
+                <View style={s.searchBar}>
+                  <Text style={s.searchIcon}>🔍</Text>
+                  <TextInput
+                    style={s.searchInput}
+                    placeholder="Search stations, districts..."
+                    placeholderTextColor={colors.textMuted}
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                  />
+                </View>
+              </View>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={s.chipRow}
+              >
+                {districts.map((d) => (
+                  <TouchableOpacity
+                    key={d}
+                    style={[s.districtChip, selectedDistrict === d && s.districtChipActive]}
+                    onPress={() => setSelectedDistrict(selectedDistrict === d ? null : d)}
+                  >
+                    <Text style={[s.districtChipText, selectedDistrict === d && s.districtChipTextActive]}>
+                      {d}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </>
+          }
+          renderItem={({ item }: { item: StationListItem }) => (
+            <TouchableOpacity
+              style={s.stationCard}
+              activeOpacity={0.7}
+              onPress={() => {
+                if (item.slug) {
+                  setSelectedSlug(item.slug);
+                  setMessages([]);
+                }
+              }}
+            >
+              <View style={s.stationInfo}>
+                <Text style={s.stationName} numberOfLines={1} ellipsizeMode="tail">{item.station}</Text>
+                <Text style={s.stationDistrict} numberOfLines={1} ellipsizeMode="tail">{item.district}</Text>
+              </View>
               <TouchableOpacity
-                key={st.slug}
-                style={s.pickerStationCard}
-                activeOpacity={0.7}
+                style={s.exploreBtn}
                 onPress={() => {
-                  setSelectedSlug(st.slug);
-                  setSearchQuery("");
+                  if (item.slug) {
+                    setSelectedSlug(item.slug);
+                    setMessages([]);
+                  }
                 }}
               >
-                <View style={s.pickerStationDot} />
-                <View style={s.pickerStationInfo}>
-                  <Text style={s.pickerStationName} numberOfLines={1}>
-                    {st.station}
-                  </Text>
-                  <Text style={s.pickerStationDistrict}>{st.district}</Text>
-                </View>
-                <Text style={s.pickerStationArrow}>→</Text>
+                <Text style={s.exploreBtnText}>Explore →</Text>
               </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
+            </TouchableOpacity>
+          )}
+          contentContainerStyle={s.listContent}
+        />
       </View>
     );
   }
@@ -1172,6 +1224,7 @@ const s = StyleSheet.create({
     flexDirection: "row",
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
+    paddingBottom: spacing.md + BOTTOM_NAV_CLEARANCE,
     gap: spacing.sm,
     backgroundColor: colors.surface,
     borderTopWidth: 1,
@@ -1206,58 +1259,87 @@ const s = StyleSheet.create({
     color: colors.textOnPrimary,
   },
 
-  pickerContainer: { flex: 1 },
+  pickerContainer: { flex: 1, paddingTop: spacing.sm, paddingBottom: BOTTOM_NAV_CLEARANCE },
+
+  // Station list styles
+  listContent: { paddingBottom: BOTTOM_NAV_CLEARANCE },
+  searchRow: { paddingHorizontal: spacing.lg, marginBottom: spacing.md },
+  searchBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  searchIcon: { fontSize: 14 },
+  searchInput: {
+    flex: 1,
+    ...typography.body,
+    color: colors.textPrimary,
+    paddingVertical: spacing.sm,
+  },
+  chipRow: { paddingHorizontal: spacing.lg, paddingBottom: spacing.md, gap: spacing.sm },
+  districtChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.full,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  districtChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  districtChipText: { ...typography.labelSm, color: colors.textSecondary },
+  districtChipTextActive: { color: colors.onPrimary },
+  stationCard: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  stationInfo: { flex: 1, gap: spacing.xxs },
+  stationName: { ...typography.titleMd, color: colors.textPrimary },
+  stationDistrict: { ...typography.caption, color: colors.textSecondary },
+  exploreBtn: {
+    backgroundColor: colors.primaryLight,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  exploreBtnText: { ...typography.labelSm, color: colors.primaryDeep, fontWeight: "600" },
   pickerSearchBar: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: colors.surface,
-    borderRadius: radii.lg,
+    borderRadius: 24,
     marginHorizontal: spacing.lg,
-    marginTop: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    gap: spacing.sm,
-    ...elevation.medium,
-  },
-  pickerSearchIcon: { fontSize: 16 },
-  pickerSearchInput: {
-    flex: 1,
-    fontSize: 14,
-    color: colors.textPrimary,
-    padding: 0,
-  },
-  pickerList: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: BOTTOM_NAV_CLEARANCE,
-  },
-  pickerStationCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: colors.surface,
-    borderRadius: radii.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.sm,
+    paddingVertical: 14,
+    gap: spacing.sm,
     borderWidth: 1,
     borderColor: colors.border,
+    ...elevation.low,
   },
-  pickerStationDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: colors.primary,
-    marginRight: spacing.md,
-  },
-  pickerStationInfo: { flex: 1, gap: 2 },
-  pickerStationName: {
+  pickerSearchIcon: { fontSize: 18, color: colors.textMuted },
+  pickerSearchPlaceholder: {
+    flex: 1,
     fontSize: 15,
-    fontWeight: "600",
-    color: colors.textPrimary,
+    color: colors.textMuted,
   },
-  pickerStationDistrict: { fontSize: 12, color: colors.textMuted },
-  pickerStationArrow: {
-    fontSize: 18,
-    color: colors.primary,
-    fontWeight: "600",
+  pickerHint: {
+    alignItems: "center",
+    paddingVertical: spacing.xl,
+  },
+  pickerHintText: {
+    fontSize: 13,
+    color: colors.textMuted,
   },
 });

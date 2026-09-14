@@ -1,24 +1,32 @@
 import React from "react";
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, usePathname } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../theme/colors";
 import { spacing, radii, elevation } from "../theme/spacing";
-import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 
 const TABS = [
-  { key: "index", label: "Map", icon: "map-outline" as const, activeIcon: "map" as const },
-  { key: "watchlist", label: "Watchlist", icon: "list-outline" as const, activeIcon: "list" as const },
-  { key: "forecast", label: "Forecast", icon: "stats-chart-outline" as const, activeIcon: "stats-chart" as const },
-  { key: "assistant", label: "Assistant", icon: "chatbubble-outline" as const, activeIcon: "chatbubble" as const },
+  { key: "index", label: "Map", icon: "map-outline" as const, activeIcon: "map" as const, route: "/(tabs)" },
+  { key: "watchlist", label: "Watchlist", icon: "list-outline" as const, activeIcon: "list" as const, route: "/(tabs)/watchlist" },
+  { key: "forecast", label: "Forecast", icon: "stats-chart-outline" as const, activeIcon: "stats-chart" as const, route: "/(tabs)/forecast" },
+  { key: "assistant", label: "Assistant", icon: "chatbubble-outline" as const, activeIcon: "chatbubble" as const, route: "/(tabs)/assistant" },
 ] as const;
 
 const TAB_SIZE = 56;
 const ICON_SIZE = 22;
 
-export default function BottomNav({ state, navigation }: BottomTabBarProps) {
-  const currentRoute = state.routes[state.index];
-  const currentKey = currentRoute?.name ?? "index";
+export default function BottomNavBar({ activeTab }: { activeTab?: string }) {
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const currentKey = activeTab ?? (
+    pathname.includes("/station/") ? "watchlist" :
+    pathname.includes("/drivers/") ? "watchlist" :
+    pathname.includes("/forecast") ? "forecast" :
+    pathname.includes("/assistant") ? "assistant" :
+    pathname.includes("/watchlist") ? "watchlist" :
+    "index"
+  );
 
   return (
     <View style={styles.wrapper} pointerEvents="box-none">
@@ -32,7 +40,7 @@ export default function BottomNav({ state, navigation }: BottomTabBarProps) {
               activeOpacity={0.7}
               onPress={() => {
                 if (!isActive) {
-                  navigation.navigate(tab.key);
+                  router.replace(tab.route as any);
                 }
               }}
             >

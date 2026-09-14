@@ -19,7 +19,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { StationListItem } from "../../types/station";
 
 const STORAGE_KEY_NAME = "aquis_user_name";
-const STORAGE_KEY_PERSONA = "aquis_persona";
 
 export default function WatchlistScreen() {
   const insets = useSafeAreaInsets();
@@ -109,17 +108,14 @@ export default function WatchlistScreen() {
     >
       <View style={styles.stationHeader}>
         <View style={styles.stationInfo}>
-          <Text style={styles.stationName} numberOfLines={1}>{item.station}</Text>
-          <Text style={styles.stationSlug} numberOfLines={1}>{item.slug ?? "—"}</Text>
+          <Text style={styles.stationName} numberOfLines={1} ellipsizeMode="tail">{item.station}</Text>
+          <Text style={styles.stationSlug} numberOfLines={1} ellipsizeMode="tail">{item.slug ?? "—"}</Text>
         </View>
         <View style={styles.stationBadge}>
-          <Text style={styles.stationBadgeText}>{item.district}</Text>
+          <Text style={styles.stationBadgeText} numberOfLines={1}>{item.district}</Text>
         </View>
       </View>
       <View style={styles.stationFooter}>
-        <Text style={styles.stationTime}>
-          {item.last_ts ? new Date(item.last_ts).toLocaleDateString() : "—"}
-        </Text>
         <TouchableOpacity
           style={styles.exploreBtn}
           onPress={() => item.slug && router.push(`/station/${item.slug}`)}

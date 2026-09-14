@@ -47,7 +47,14 @@ export default function RootLayout() {
         <Stack.Screen name="public-placeholder" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen
-          name="station/[id]"
+          name="station/[slug]"
+          options={{
+            presentation: "card",
+            animation: "slide_from_right",
+          }}
+        />
+        <Stack.Screen
+          name="drivers/[slug]"
           options={{
             presentation: "card",
             animation: "slide_from_right",
@@ -55,13 +62,6 @@ export default function RootLayout() {
         />
         <Stack.Screen
           name="station-search"
-          options={{
-            presentation: "card",
-            animation: "slide_from_right",
-          }}
-        />
-        <Stack.Screen
-          name="forecast/[slug]"
           options={{
             presentation: "card",
             animation: "slide_from_right",

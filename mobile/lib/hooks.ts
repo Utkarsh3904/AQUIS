@@ -35,17 +35,11 @@ export function useStations() {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    console.log("[useStations] fetching /stations?limit=2000 ...");
     fetchStationList()
       .then((rows) => {
-        console.log("[useStations] OK — got", rows.length, "stations");
-        if (rows.length > 0) {
-          console.log("[useStations] first station:", JSON.stringify(rows[0]));
-        }
         setData(rows);
       })
       .catch((e: ApiRequestError) => {
-        console.error("[useStations] FAILED:", e.status, JSON.stringify(e.body), e.message);
         setError(toHookError(e));
       })
       .finally(() => setLoading(false));
@@ -74,7 +68,7 @@ export function useStationFacts(id: number | null) {
   return { data, loading, error };
 }
 
-export function useStationSeries(slug: string | null, opts?: { drivers?: string[]; limit?: number }) {
+export function useStationSeries(slug: string | null, opts?: { drivers?: string[]; from?: string; to?: string; limit?: number }) {
   const [data, setData] = useState<StationSeriesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<HookError | null>(null);
@@ -228,15 +222,11 @@ export function useFleetAlerts(limit?: number) {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    const url = `/fleet/alerts${limit ? `?limit=${limit}` : ""}`;
-    console.log("[useFleetAlerts] fetching", url, "...");
     fetchFleetAlerts(limit)
       .then((res) => {
-        console.log("[useFleetAlerts] OK — count:", res.count, "alerts:", res.alerts?.length);
         setData(res);
       })
       .catch((e: ApiRequestError) => {
-        console.error("[useFleetAlerts] FAILED:", e.status, JSON.stringify(e.body), e.message);
         setError(toHookError(e));
       })
       .finally(() => setLoading(false));

@@ -14,10 +14,10 @@ export function StationCard({ station, onPress }: StationCardProps) {
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.7}>
       <View style={styles.info}>
-        <Text style={styles.name} numberOfLines={1}>
+        <Text style={styles.name} numberOfLines={1} ellipsizeMode="tail">
           {station.station}
         </Text>
-        <Text style={styles.district}>{station.district}</Text>
+        <Text style={styles.district} numberOfLines={1} ellipsizeMode="tail">{station.district}</Text>
       </View>
       <View style={styles.meta}>
         <Text style={styles.time}>{formatRelativeTime(station.last_ts)}</Text>

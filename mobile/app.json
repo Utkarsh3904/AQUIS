@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "AQUIS",
+    "slug": "aquis-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "aquis",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.aquis.mobile"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#F0F4F8"
+      },
+      "package": "com.aquis.mobile"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-asset"
+    ]
+  }
+}
